@@ -1163,6 +1163,9 @@ static void mdss_fb_scale_bl(struct msm_fb_data_type *mfd, u32 *bl_lvl)
 	(*bl_lvl) = temp;
 }
 
+#ifdef CONFIG_MACH_NX512J
+struct msm_fb_data_type *zte_camera_mfd;
+#endif
 /* must call this function from within mfd->bl_lock */
 void mdss_fb_set_backlight(struct msm_fb_data_type *mfd, u32 bkl_lvl)
 {
@@ -1188,6 +1191,9 @@ void mdss_fb_set_backlight(struct msm_fb_data_type *mfd, u32 bkl_lvl)
 	} else {
 		mfd->unset_bl_level = 0;
 	}
+#ifdef CONFIG_MACH_NX512J
+	 zte_camera_mfd = mfd;
+#endif
 
 	pdata = dev_get_platdata(&mfd->pdev->dev);
 
@@ -1240,6 +1246,9 @@ void mdss_fb_update_backlight(struct msm_fb_data_type *mfd)
 				mdss_fb_scale_bl(mfd, &temp);
 			pdata->set_backlight(pdata, temp);
 			mfd->bl_level_scaled = mfd->unset_bl_level;
+#ifdef CONFIG_MACH_NX512J
+	                zte_camera_mfd = mfd;
+#endif
 			mdss_fb_bl_update_notify(mfd);
 			mfd->allow_bl_update = true;
 		}

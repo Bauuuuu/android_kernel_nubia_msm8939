@@ -102,6 +102,9 @@ struct msm_actuator_ctrl_t {
 	struct msm_actuator_vreg vreg_cfg;
 	struct park_lens_data_t park_lens;
 	uint32_t max_code_size;
+#ifdef CONFIG_MACH_NX512J
+    char act_name[32];
+#endif
 };
 
 #endif

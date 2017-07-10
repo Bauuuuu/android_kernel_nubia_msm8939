@@ -54,7 +54,17 @@ enum msm_sensor_resolution_t {
 	MSM_SENSOR_RES_5,
 	MSM_SENSOR_RES_6,
 	MSM_SENSOR_RES_7,
+#ifdef CONFIG_MACH_NX512J
+	MSM_SENSOR_RES_8,
+	MSM_SENSOR_RES_9,
+	MSM_SENSOR_RES_10,
+	MSM_SENSOR_RES_11,
+	MSM_SENSOR_RES_12,
+	MSM_SENSOR_RES_13,
+	MSM_SENSOR_RES_14,
+	MSM_SENSOR_RES_15,
 	MSM_SENSOR_INVALID_RES,
+#endif
 };
 
 enum msm_camera_stream_type_t {
@@ -404,6 +414,11 @@ enum msm_sensor_cfg_type_t {
 #ifdef CONFIG_MACH_YULONG
 	CFG_UPDATE_OTP,
 #endif
+#ifdef CONFIG_MACH_NX512J
+	CFG_SET_OTP_INIT_PARAM, //  modify for set otp param
+        //for setBacklight
+	CFG_SET_ZTE_BACKLIGHT,
+#endif
 };
 
 enum msm_actuator_cfg_type_t {
@@ -415,6 +430,9 @@ enum msm_actuator_cfg_type_t {
 	CFG_ACTUATOR_POWERDOWN,
 	CFG_ACTUATOR_POWERUP,
 	CFG_ACTUATOR_INIT,
+#ifdef CONFIG_MACH_NX512J
+	CFG_SET_ACTUATOR_NAME,
+#endif
 };
 
 enum msm_ois_cfg_type_t {
@@ -544,6 +562,9 @@ struct msm_actuator_cfg_data {
 		struct msm_actuator_get_info_t get_info;
 		struct msm_actuator_set_position_t setpos;
 		enum af_camera_name cam_name;
+#ifdef CONFIG_MACH_NX512J
+             char *act_name;
+#endif
 	} cfg;
 };
 
@@ -695,6 +716,9 @@ struct msm_actuator_cfg_data32 {
 		struct msm_actuator_get_info_t get_info;
 		struct msm_actuator_set_position_t setpos;
 		enum af_camera_name cam_name;
+		// ZTEMT: fuyipeng add for manual AF -----start
+             char *act_name;
+             // ZTEMT: fuyipeng add for manual AF -----end	
 	} cfg;
 };
 

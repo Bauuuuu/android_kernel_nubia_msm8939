@@ -38,6 +38,11 @@
 #define BTSCO_RATE_16KHZ 16000
 #define MAX_SND_CARDS 3
 
+#ifdef CONFIG_FEATURE_ZTEMT_AUDIO_EXT_PA
+#define EXTERNAL_PA_ON 1
+#define EXTERNAL_PA_OFF 0
+#endif //CONFIG_FEATURE_ZTEMT_AUDIO_EXT_PA
+
 #define PRI_MI2S_ID	(1 << 0)
 #define SEC_MI2S_ID	(1 << 1)
 #define TER_MI2S_ID	(1 << 2)
@@ -61,8 +66,20 @@ static int msm_ter_mi2s_tx_ch = 1;
 static int msm_pri_mi2s_rx_ch = 1;
 
 static int msm_proxy_rx_ch = 2;
-static int msm8909_auxpcm_rate = 8000;
 
+#ifdef CONFIG_FEATURE_ZTEMT_AUDIO_EXT_PA
+static int external_pa_control = 0;
+static int hphr_channel_control = 0;
+static int external_pa_control_gpio = -1;
+static int hphr_control_gpio = -1;
+static int external_pa_power_ctrl = 5; //1->1.2W, 3->1W, 5->0.8W, 7->1.65W 8ohm condition
+static void external_pa_delay_on_fn(struct work_struct *unused);
+static DECLARE_DELAYED_WORK(external_pa_work,external_pa_delay_on_fn);
+#endif //CONFIG_FEATURE_ZTEMT_AUDIO_EXT_PA
+
+#ifndef CONFIG_FEATURE_ZTEMT_AUDIO_EXT_PA
+static int msm8909_auxpcm_rate = 8000;
+#endif
 static atomic_t quat_mi2s_clk_ref;
 static atomic_t auxpcm_mi2s_clk_ref;
 
@@ -246,6 +263,103 @@ static void param_set_mask(struct snd_pcm_hw_params *p, int n, unsigned bit)
 static int msm8x16_mclk_event(struct snd_soc_dapm_widget *w,
 			      struct snd_kcontrol *kcontrol, int event);
 
+
+#ifdef CONFIG_FEATURE_ZTEMT_AUDIO_EXT_PA
+bool hphr_channel_on(int value)
+{
+	int curr = 0;
+	pr_debug("%s value = %d,gpio = %d\n",__func__, value, hphr_control_gpio);
+	if (!gpio_is_valid(hphr_control_gpio)) {
+		pr_err("%s: Invalid gpio: %d\n", __func__, hphr_control_gpio);
+		return false;
+	}
+	curr = gpio_get_value_cansleep(hphr_control_gpio);
+	pr_debug("%s: hphr_control_gpio current value %d\n",__func__, curr);
+	if(curr != value) {
+		gpio_direction_output(hphr_control_gpio, value);
+	}
+	curr = gpio_get_value_cansleep(hphr_control_gpio);
+	pr_debug("%s: hphr_control_gpio current value %d\n",__func__, curr);
+
+	return true;
+}
+
+bool aw8736_ext_spk_power_amp_on(int value)
+{
+	int curr = 0;
+	int count= 0;
+	int latch = 0;
+	pr_debug("%s value = %d,gpio = %d\n",__func__, value, external_pa_control_gpio);
+	if (!gpio_is_valid(external_pa_control_gpio)) {
+		pr_err("%s: Invalid gpio: %d\n", __func__, external_pa_control_gpio);
+		return false;
+	}
+	curr = gpio_get_value_cansleep(external_pa_control_gpio);
+	pr_debug("%s: external_pa_control_gpio current value %d\n",__func__, curr);
+	latch = value;
+	if(value) {
+		for(count=0;count < external_pa_power_ctrl; count++) {
+			gpio_direction_output(external_pa_control_gpio, latch);
+			latch=!latch;
+		}
+	}
+	else {
+		gpio_direction_output(external_pa_control_gpio, value);
+	}
+	curr = gpio_get_value_cansleep(external_pa_control_gpio);
+	pr_debug("%s: external_pa_control_gpio current value %d\n",__func__, curr);
+	return true;
+}
+static void external_pa_delay_on_fn(struct work_struct *unused)
+{
+	pr_debug("%s: Enter\n",__func__);
+	aw8736_ext_spk_power_amp_on(1);
+
+}
+void schedule_delay_pa_on(void)
+{
+	pr_debug("%s: Enter\n",__func__);
+	if(external_pa_control == EXTERNAL_PA_ON) {
+		if(schedule_delayed_work(&external_pa_work,msecs_to_jiffies(1))==0) {
+			printk("there is already a work scheduled\n");//60 as default
+		}
+	}
+}
+
+static int external_pa_get(struct snd_kcontrol *kcontrol,
+		struct snd_ctl_elem_value *ucontrol)
+{
+	pr_debug("%s: external_pa_control = %d\n",__func__,external_pa_control);
+	ucontrol->value.integer.value[0] = external_pa_control;
+	return 0;
+}
+static int external_pa_put(struct snd_kcontrol *kcontrol,
+		struct snd_ctl_elem_value *ucontrol)
+{
+	pr_debug("%s()\n",__func__);
+	if(external_pa_control == ucontrol->value.integer.value[0])
+		return 0;
+	external_pa_control = ucontrol->value.integer.value[0];
+	return 0;
+}
+static int hphr_channel_get(struct snd_kcontrol *kcontrol,
+		struct snd_ctl_elem_value *ucontrol)
+{
+	pr_debug("%s: hphr_channel_control = %d\n",__func__,hphr_channel_control);
+	ucontrol->value.integer.value[0] = hphr_channel_control;
+	return 0;
+}
+static int hphr_channel_put(struct snd_kcontrol *kcontrol,
+		struct snd_ctl_elem_value *ucontrol)
+{
+	pr_debug("%s()\n",__func__);
+	if(hphr_channel_control == ucontrol->value.integer.value[0])
+		return 0;
+	hphr_channel_control = ucontrol->value.integer.value[0];
+	hphr_channel_on(hphr_channel_control);
+	return 0;
+}
+#endif //CONFIG_FEATURE_ZTEMT_AUDIO_EXT_PA
 static const struct snd_soc_dapm_widget msm8x16_dapm_widgets[] = {
 
 	SND_SOC_DAPM_SUPPLY_S("MCLK", -1, SND_SOC_NOPM, 0, 0,
@@ -260,7 +374,12 @@ static const struct snd_soc_dapm_widget msm8x16_dapm_widgets[] = {
 static char const *rx_bit_format_text[] = {"S16_LE", "S24_LE"};
 static const char *const ter_mi2s_tx_ch_text[] = {"One", "Two"};
 static const char *const loopback_mclk_text[] = {"DISABLE", "ENABLE"};
+#ifdef CONFIG_FEATURE_ZTEMT_AUDIO_EXT_PA
+static const char *const external_PA_text[] = {"off", "on"};
+static const char *const hphr_control_text[] = {"off", "on"};
+#endif //CONFIG_FEATURE_ZTEMT_AUDIO_EXT_PA
 
+#ifndef CONFIG_FEATURE_ZTEMT_AUDIO_EXT_PA
 static int msm_auxpcm_be_params_fixup(struct snd_soc_pcm_runtime *rtd,
 					struct snd_pcm_hw_params *params)
 {
@@ -275,6 +394,7 @@ static int msm_auxpcm_be_params_fixup(struct snd_soc_pcm_runtime *rtd,
 
 	return 0;
 }
+#endif
 
 static int enable_spk_ext_pa(struct snd_soc_codec *codec, int enable)
 {
@@ -459,6 +579,22 @@ static int msm_btsco_be_hw_params_fixup(struct snd_soc_pcm_runtime *rtd,
 
 	return 0;
 }
+#ifndef CONFIG_FEATURE_ZTEMT_AUDIO_EXT_PA
+static int msm_bta2dp_be_hw_params_fixup(struct snd_soc_pcm_runtime *rtd,
+					struct snd_pcm_hw_params *params)
+{
+	struct snd_interval *rate = hw_param_interval(params,
+					SNDRV_PCM_HW_PARAM_RATE);
+
+	struct snd_interval *channels = hw_param_interval(params,
+					SNDRV_PCM_HW_PARAM_CHANNELS);
+
+	rate->min = rate->max = 48000;
+	channels->min = channels->max = 2;
+
+	return 0;
+}
+#endif
 
 static int msm_proxy_rx_be_hw_params_fixup(struct snd_soc_pcm_runtime *rtd,
 					struct snd_pcm_hw_params *params)
@@ -834,6 +970,10 @@ static const struct soc_enum msm_snd_enum[] = {
 	SOC_ENUM_SINGLE_EXT(2, rx_bit_format_text),
 	SOC_ENUM_SINGLE_EXT(2, ter_mi2s_tx_ch_text),
 	SOC_ENUM_SINGLE_EXT(2, loopback_mclk_text),
+#ifdef CONFIG_FEATURE_ZTEMT_AUDIO_EXT_PA
+	SOC_ENUM_SINGLE_EXT(2, external_PA_text),
+	SOC_ENUM_SINGLE_EXT(2, hphr_control_text),
+#endif //CONFIG_FEATURE_ZTEMT_AUDIO_EXT_PA
 };
 
 static const char *const btsco_rate_text[] = {"8000", "16000"};
@@ -852,7 +992,12 @@ static const struct snd_kcontrol_new msm_snd_controls[] = {
 			loopback_mclk_get, loopback_mclk_put),
 	SOC_ENUM_EXT("Internal BTSCO SampleRate", msm_btsco_enum[0],
 		     msm_btsco_rate_get, msm_btsco_rate_put),
-
+#ifdef CONFIG_FEATURE_ZTEMT_AUDIO_EXT_PA
+	SOC_ENUM_EXT("External PA", msm_snd_enum[3],
+			external_pa_get,external_pa_put),
+	SOC_ENUM_EXT("HPHR CTRL", msm_snd_enum[4],
+			hphr_channel_get,hphr_channel_put),
+#endif //CONFIG_FEATURE_ZTEMT_AUDIO_EXT_PA
 };
 
 static int msm8x16_mclk_event(struct snd_soc_dapm_widget *w,
@@ -939,6 +1084,16 @@ static int conf_int_codec_mux_sec(struct msm8916_asoc_mach_data *pdata)
 	vaddr = pdata->vaddr_gpio_mux_spkr_ctl;
 	val = ioread32(vaddr);
 	/* enable sec MI2S interface to TLMM GPIO */
+#ifdef CONFIG_FEATURE_ZTEMT_AUDIO_EXT_PA
+	val = val | 0x0004007E;
+	pr_debug("%s: Sec mux configuration = %x\n", __func__, val);
+	iowrite32(val, vaddr);
+	vaddr = pdata->vaddr_gpio_mux_mic_ctl;
+	val = ioread32(vaddr);
+	val = val | 0x00200000;
+	iowrite32(val, vaddr);
+	return 0;
+#else
 	val = val | 0x0004004E;
 	pr_debug("%s: Sec mux configuration = %x\n", __func__, val);
 	iowrite32(val, vaddr);
@@ -1003,6 +1158,7 @@ static void msm_prim_auxpcm_shutdown(struct snd_pcm_substream *substream)
 			pr_err("%s: error at pinctrl state select\n",
 				__func__);
 	}
+#endif
 }
 
 static int msm_sec_mi2s_snd_startup(struct snd_pcm_substream *substream)
@@ -1346,6 +1502,18 @@ static void *def_msm8x16_wcd_mbhc_cal(void)
 	 * all btn_low corresponds to threshold for current source
 	 * all bt_high corresponds to threshold for Micbias
 	 */
+#ifdef CONFIG_FEATURE_ZTEMT_AUDIO_EXT_PA
+	btn_low[0] = 300;
+	btn_high[0] = 500;
+	btn_low[1] = 300;
+	btn_high[1] = 500;
+	btn_low[2] = 300;
+	btn_high[2] = 500;
+	btn_low[3] = 300;
+	btn_high[3] = 500;
+	btn_low[4] = 300;
+	btn_high[4] = 500;
+#else
 	btn_low[0] = 25;
 	btn_high[0] = 25;
 	btn_low[1] = 50;
@@ -1356,6 +1524,7 @@ static void *def_msm8x16_wcd_mbhc_cal(void)
 	btn_high[3] = 112;
 	btn_low[4] = 137;
 	btn_high[4] = 137;
+#endif
 
 	return msm8x16_wcd_cal;
 }
@@ -1506,6 +1675,7 @@ static struct snd_soc_dai_link msm8x16_9302_dai[] = {
 		.ignore_pmdown_time = 1, /* dai link has playback support */
 		.ignore_suspend = 1,
 	},
+#ifndef CONFIG_FEATURE_ZTEMT_AUDIO_EXT_PA	
 	{
 		.name = LPASS_BE_QUAT_MI2S_TX,
 		.stream_name = "Quaternary Capture",
@@ -1519,6 +1689,7 @@ static struct snd_soc_dai_link msm8x16_9302_dai[] = {
 		.ops = &msm8x16_mi2s_be_ops,
 		.ignore_suspend = 1,
 	},
+#endif	
 };
 
 /* Digital audio interface glue - connects codec <---> CPU */
@@ -1980,6 +2151,7 @@ static struct snd_soc_dai_link msm8x16_dai[] = {
 		.ignore_suspend = 1,
 	},
 	/* Primary AUX PCM Backend DAI Links */
+#ifndef CONFIG_FEATURE_ZTEMT_AUDIO_EXT_PA	
 	{
 		.name = LPASS_BE_AUXPCM_RX,
 		.stream_name = "AUX PCM Playback",
@@ -2007,6 +2179,7 @@ static struct snd_soc_dai_link msm8x16_dai[] = {
 		.ops = &msm_pri_auxpcm_be_ops,
 		.ignore_suspend = 1,
 	},
+#endif
 	{
 		.name = LPASS_BE_INT_BT_SCO_RX,
 		.stream_name = "Internal BT-SCO Playback",
@@ -2239,6 +2412,35 @@ static int msm8x16_setup_hs_jack(struct platform_device *pdev,
 			struct msm8916_asoc_mach_data *pdata)
 {
 	struct pinctrl *pinctrl;
+
+#ifdef CONFIG_FEATURE_ZTEMT_AUDIO_EXT_PA
+	external_pa_control_gpio = of_get_named_gpio(pdev->dev.of_node,
+					"qcom,cdc-ext-amp-gpios", 0);
+	if(external_pa_control_gpio < 0) {
+		dev_dbg(&pdev->dev,"property %s in node %s not found %d\n",
+				"qcom,cdc-ext-amp-gpios", pdev->dev.of_node->full_name,
+				external_pa_control_gpio);	
+	}
+	if(gpio_request(external_pa_control_gpio,"ext_pa_ctrl_pin")){
+		pr_err("%s: ext pa control gpio request failed\n",__func__);
+	}
+	//initialize the state config value
+	aw8736_ext_spk_power_amp_on(0);
+	external_pa_control = 0;
+
+	hphr_control_gpio = of_get_named_gpio(pdev->dev.of_node,
+					"qcom,hphr-ctrl-gpios", 0);
+	if(hphr_control_gpio < 0) {
+		dev_dbg(&pdev->dev,"property %s in node %s not found %d\n",
+				"qcom,hphr-crtl-gpios", pdev->dev.of_node->full_name,
+				hphr_control_gpio);	
+	}
+	if(gpio_request(hphr_control_gpio,"hphr_ctrl_pin")){
+		pr_err("%s: hphr control gpio request failed\n",__func__);
+	}
+	hphr_channel_on(1);
+	//enable the HPHR switch at bootup, keep same with the Qualcomm MTP design
+#endif// CONFIG_FEATURE_ZTEMT_AUDIO_EXT_PA
 
 	pdata->us_euro_gpio = of_get_named_gpio(pdev->dev.of_node,
 					"qcom,cdc-us-euro-gpios", 0);

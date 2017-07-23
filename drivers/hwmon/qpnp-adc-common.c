@@ -44,6 +44,36 @@
    and provided to the battery driver in the units desired for
    their framework which is 0.1DegC. True resolution of 0.1DegC
    will result in the below table size to increase by 10 times */
+
+#if (defined CONFIG_ZTEMT_COMM_CHARGE)   \
+ || (defined CONFIG_ZTEMT_BQ24296M_CHARGE) \
+ || (defined CONFIG_ZTEMT_BQ24296_CHARGE)
+static const struct qpnp_vadc_map_pt adcmap_btm_threshold[] = {
+	{-300, 1626},
+	{-250, 1573},
+	{-200, 1510},
+	{-150, 1438},
+	{-100, 1358},
+	{-50, 1274},
+	{0,   1188},
+	{50,  1103},
+	{100, 1022},
+	{150,  946},
+	{200,  877},
+	{250,  816},
+	{300,  763},
+	{350,  718},
+	{400,  679},
+	{450,  647},
+	{500,  619},
+	{550,  596},
+	{600,  577},
+	{650,  561},
+	{700,  548},
+	{750,  537},
+	{800,  528}
+};
+#else
 static const struct qpnp_vadc_map_pt adcmap_btm_threshold[] = {
 #ifdef CONFIG_MACH_RENDANG
 	{-100,	1262},
@@ -293,6 +323,7 @@ static const struct qpnp_vadc_map_pt adcmap_btm_threshold[] = {
 	{790,	203}
 #endif /* CONFIG_MACH_RENDANG || CONFIG_MACH_JALEBI || CONFIG_MACH_CP8675 */
 };
+#endif
 
 static const struct qpnp_vadc_map_pt adcmap_qrd_btm_threshold[] = {
 	{-200,	1540},

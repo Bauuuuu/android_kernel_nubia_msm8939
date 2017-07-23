@@ -221,7 +221,9 @@ config TOUCHSCREEN_CYPRESS_CYTTSP4_DEBUG_MODULE
 	  Debug module.
 	  This module adds support for verbose printing touch
 	  information.
-	  
+
+source "drivers/input/touchscreen/gt1x/Kconfig"
+source "drivers/input/touchscreen/cyttsp5/Kconfig"
 source "drivers/input/touchscreen/synaptics_dsx/Kconfig"
 
 config TOUCHSCREEN_88PM860X

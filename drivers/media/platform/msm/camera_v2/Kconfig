@@ -268,15 +268,6 @@ config MSM_GEMINI
 	---help---
 	  Enables support for the Gemini JPEG encoder engine for 8x60.
 
-config N958ST_CAMERA
-	bool "zte N958St camera"
-
-config N918ST_CAMERA
-	bool "zte N918St  camera"
-
-config NX511J_CAMERA
-	bool "zte NX511J  camera"
-
 config CAMERA_INFO_SHOW
 	bool "enable camera info show "
 

@@ -17,8 +17,6 @@
 #include "msm_actuator.h"
 #include "msm_cci.h"
 
-#include  "../t4k37_otp.h"
-#include  "../t4k35_otp.h"
 DEFINE_MSM_MUTEX(msm_actuator_mutex);
 
 #undef CDBG
@@ -624,15 +622,10 @@ static int32_t msm_actuator_set_position(
 	int32_t index;
 	uint16_t next_lens_position;
 	uint16_t delay;
- #if (defined(CONFIG_N958ST_CAMERA) || defined(CONFIG_N918ST_CAMERA))
-	uint32_t hw_params = 0xF400;
-	uint16_t value=0;
-#else	
 	uint32_t hw_params = 0;
 // ZTEMT: fuyipeng add manual AF for imx234  -----start
 	uint16_t value=0;
 // ZTEMT: fuyipeng add manual AF for imx234  -----end
-#endif
 /* ZTEMT: zhanglilang add manual AF compensation for rohm_bu64297gwz  -----start */
       	uint16_t dac_comp = 99; 
 /* ZTEMT: zhanglilang add manual AF compensation for rohm_bu64297gwz  -----end */
@@ -644,18 +637,6 @@ static int32_t msm_actuator_set_position(
 			set_pos->number_of_steps);
 		return -EFAULT;
 	}
-  // ZTEMT: fuyipeng add manual AF for imx234  -----start
-    pr_err("msm_actuator_set_position---act_name:%s \n", a_ctrl->act_name);
-     if(!strncmp(a_ctrl->act_name, "bu64291gwz_t4k37_msm8939", 32)){
-		#define NX511J_V2A_MEX_CAMERA
-		hw_params = 0xF400;
-		value = 0;
-	}
-    if ((!strncmp(a_ctrl->act_name, "rohm_bu64297gwz", 32)) || (!strncmp(a_ctrl->act_name, "imx214_sunny_c1507", 32)))
-    {
-  	  hw_params = 0xF400;
-    }
-    // ZTEMT: fuyipeng add manual AF for imx234  -----end
 
 	a_ctrl->i2c_tbl_index = 0;
 	for (index = 0; index < set_pos->number_of_steps; index++) {
@@ -689,39 +670,6 @@ static int32_t msm_actuator_set_position(
 			// ZTEMT: fuyipeng add manual AF for imx234  -----end
 		}
 
- #if (defined(CONFIG_N958ST_CAMERA) || defined(CONFIG_N918ST_CAMERA)||defined(NX511J_V2A_MEX_CAMERA))
-         value = set_pos->pos[index];
-        if(value < 0 || value > 79){     /* if over total steps*/
-            pr_err("%s Failed I2C write Line %d\n", __func__, __LINE__);
-                return rc;
-         }
- 	 dac_comp = 77;
-        value = 79 - value;
-
-        if(value == 79){
-    		if((af_otp_status==1)&&(af_macro_value>af_inifity_value))
-    		   next_lens_position= af_macro_value+150;
-    		else if ((t4k35_af_otp_status == 1) && (t4k35_af_macro_value > t4k35_af_inifity_value))
-    		{
-    		    next_lens_position= t4k35_af_macro_value + 150;
-    		}
-    		else
-    		   next_lens_position = 800;
-            a_ctrl->curr_step_pos = a_ctrl->region_params[a_ctrl->region_size - 1].step_bound[MOVE_NEAR] - 3;
-        }else{
-             if((af_otp_status==1)&&(af_macro_value>af_inifity_value))
-		        a_ctrl->step_position_table[0]= af_inifity_value -150;
-			 else if ((t4k35_af_otp_status == 1) && (t4k35_af_macro_value > t4k35_af_inifity_value))
-			 {
-			     a_ctrl->step_position_table[0]= t4k35_af_inifity_value - 100;
-			 }
-            next_lens_position = a_ctrl->step_position_table[0] + 7*value + dac_comp;
-			a_ctrl->curr_step_pos = next_lens_position - a_ctrl->step_position_table[0];
-        }
-    //    pr_err(" jun value = %d, af_macro_value=%d,af_inifity_value = %d,af_otp_status = %d\n",  
-	//		                                                         value,af_macro_value,af_inifity_value,af_otp_status);
-        pr_err(" jun next_lens_position = %d, cur_step_pos=%d\n",  next_lens_position,a_ctrl->curr_step_pos);		
- #endif
 		a_ctrl->func_tbl->actuator_parse_i2c_params(a_ctrl,
 		next_lens_position, hw_params, delay);
 

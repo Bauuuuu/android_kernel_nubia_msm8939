@@ -18,7 +18,6 @@
 #include "msm_cci.h"
 #include "msm_camera_dt_util.h"
 
-#include "t4k37_otp.h"
 
 #ifdef CONFIG_CAMERA_INFO_SHOW
 #include <linux/timer.h>
@@ -658,10 +657,6 @@ int32_t msm_sensor_driver_probe(void *setting,
 	struct msm_camera_slave_info        *camera_info = NULL;
 
 	unsigned long                        mount_pos = 0;
-	
-#if (defined(CONFIG_N958ST_CAMERA)|| defined(CONFIG_N918ST_CAMERA)||defined(CONFIG_NX511J_CAMERA))
-    uint16_t  chipid = 0;
-#endif
 	uint32_t                             is_yuv;
 
 	/* Validate input parameters */
@@ -925,21 +920,6 @@ int32_t msm_sensor_driver_probe(void *setting,
 	   }
 #endif
 
-#if (defined(CONFIG_N958ST_CAMERA)|| defined(CONFIG_N918ST_CAMERA)||defined(CONFIG_NX511J_CAMERA))
-	rc = s_ctrl->sensor_i2c_client->i2c_func_tbl->i2c_read(
-		s_ctrl->sensor_i2c_client, s_ctrl->sensordata->slave_info->sensor_id_reg_addr,
-		&chipid, MSM_CAMERA_I2C_WORD_DATA);
-	  pr_err("tanyijun %s: %s: read id : %x\n", __func__, s_ctrl->sensordata->sensor_name,chipid);
-	  if (chipid == 0x1C21) {
-	  	printk("read t4k37 otp now\n");
-		t4k37_otp_init_setting(s_ctrl);
-		 
-	  }
-	  
-	  if (chipid != 0x1C21) {
-		  pr_err("tanyijun read_eeprom_memory() chip id doesnot match\n");
-	  }
-#endif
 
 	pr_err("%s probe succeeded", slave_info->sensor_name);
 

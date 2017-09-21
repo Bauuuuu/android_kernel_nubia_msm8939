@@ -18,9 +18,6 @@
 #include <linux/regulator/rpm-smd-regulator.h>
 #include <linux/regulator/consumer.h>
 
-#include "t4k37_otp.h"
-#include "t4k35_otp.h"
-
 // ZTEMT: peijun add for setBacklight -----start
 #include "../../../../../../video/msm/mdss/mdss_fb.h"
 extern struct msm_fb_data_type *zte_camera_mfd;
@@ -988,41 +985,6 @@ static int msm_sensor_config32(struct msm_sensor_ctrl_t *s_ctrl,
 			rc = -EFAULT;
 			break;
 		}
-		/*slow af closing*/
-#if (defined(CONFIG_NX511J_CAMERA))
-		if (!strncmp(dev_name(&s_ctrl->pdev->dev),"0.qcom,camera",sizeof(dev_name(&s_ctrl->pdev->dev)))
-			&&!strncmp(s_ctrl->sensordata->actuator_name,"bu64291gwz_t4k37_msm8939",30)){
-			enum msm_camera_i2c_reg_addr_type temp_addr_type;
-			uint16_t addr = 0;
-			uint16_t data = 0;
-			uint16_t i = 0;
-			int32_t lens_position = 300;
-			int32_t lens_position_trans = 0;
-			uint16_t close_step_num = 6;
-			uint16_t close_step=lens_position/close_step_num;
-			temp_addr_type = s_ctrl->sensor_i2c_client->addr_type;
-			pr_err("wdyaf lens_position=%d\n",lens_position);
-			for(i=0;i<close_step;i++){
-			lens_position_trans = lens_position | 0xF400;
-			addr = (lens_position_trans & 0xFF00) >> 8;
-			data = lens_position & 0xFF;
-			lens_position -= close_step;
-			if(lens_position<0)
-				lens_position = 0;
-			pr_err("wdyaf lens_position=%d\n",lens_position);
-			s_ctrl->sensor_i2c_client->cci_client->sid = 0x18 >> 1;
-			s_ctrl->sensor_i2c_client->addr_type = MSM_CAMERA_I2C_BYTE_ADDR;
-			s_ctrl->sensor_i2c_client->i2c_func_tbl->i2c_write(
-				s_ctrl->sensor_i2c_client, addr, data,MSM_CAMERA_I2C_BYTE_DATA);
-			msleep(10);
-			if(lens_position==0)
-				break;
-			}
-			s_ctrl->sensor_i2c_client->cci_client->sid =
-				s_ctrl->sensordata->slave_info->sensor_slave_addr >> 1;
-			s_ctrl->sensor_i2c_client->addr_type = temp_addr_type;
-		}
-#endif
 		if (s_ctrl->func_tbl->sensor_power_down) {
 			if (s_ctrl->sensordata->misc_regulator)
 				msm_sensor_misc_regulator(s_ctrl, 0);
@@ -1142,16 +1104,6 @@ int msm_sensor_config(struct msm_sensor_ctrl_t *s_ctrl, void __user *argp)
 			cdata->cfg.sensor_info.sensor_mount_angle);
 
 		break;
-	// zte-fuyipeng modify for T4k35 otp +++
-	case CFG_SET_OTP_INIT_PARAM:
-		if (!strncmp(s_ctrl->sensordata->sensor_name, "t4k35", 6))
-		{
-            printk("fuyipeng set t4k35 otp calibration \n ");
-			t4k35_otp_init_setting(s_ctrl);
-        }
-		
-		break;
-    // zte-fuyipeng modify for T4k35 otp ---
 	case CFG_GET_SENSOR_INIT_PARAMS:
 		cdata->cfg.sensor_init_params.modes_supported =
 			s_ctrl->sensordata->sensor_info->modes_supported;
@@ -1206,12 +1158,6 @@ int msm_sensor_config(struct msm_sensor_ctrl_t *s_ctrl, void __user *argp)
 			rc = -EFAULT;
 			break;
 		}
-
-         if (!strncmp(s_ctrl->sensordata->sensor_name, "t4k37_qtech_f4k37ab", 32))
-         	{
-                 printk("start t4k37 lsc and awb calibration \n ");
-		  t4k37_otp_init_setting(s_ctrl);
-		 }
 
 		conf_array.reg_setting = reg_setting;
 		rc = s_ctrl->sensor_i2c_client->i2c_func_tbl->i2c_write_table(
@@ -1433,47 +1379,6 @@ int msm_sensor_config(struct msm_sensor_ctrl_t *s_ctrl, void __user *argp)
 			rc = -EFAULT;
 			break;
 		}
-		//added by congshan start
-#if (defined(CONFIG_N958ST_CAMERA)|| defined(CONFIG_N918ST_CAMERA))
-		if (!strncmp(dev_name(&s_ctrl->pdev->dev),"0.qcom,camera",sizeof(dev_name(&s_ctrl->pdev->dev)))){
-			enum msm_camera_i2c_reg_addr_type temp_addr_type;
-			int32_t lens_position = 500;
-			uint16_t addr = 0;
-			uint16_t data = 0;
-			//printk("sssssssss\n");
-			lens_position = 300;
-			lens_position = lens_position | 0xF400;
-			addr = (lens_position & 0xFF00) >> 8;
-			lens_position = 300;
-			data = lens_position & 0xFF;
-			temp_addr_type = s_ctrl->sensor_i2c_client->addr_type;
-			s_ctrl->sensor_i2c_client->cci_client->sid = 0x18 >> 1;
-			s_ctrl->sensor_i2c_client->addr_type = MSM_CAMERA_I2C_BYTE_ADDR;
-			s_ctrl->sensor_i2c_client->i2c_func_tbl->i2c_write(
-				s_ctrl->sensor_i2c_client, addr, data,MSM_CAMERA_I2C_BYTE_DATA);
-			msleep(20);
-			lens_position = 200;
-			lens_position = lens_position | 0xF400;
-			addr = (lens_position & 0xFF00) >> 8;
-			lens_position = 200;
-			data = lens_position & 0xFF;
-			s_ctrl->sensor_i2c_client->i2c_func_tbl->i2c_write(
-				s_ctrl->sensor_i2c_client, addr, data,MSM_CAMERA_I2C_BYTE_DATA);
-			msleep(20);
-			lens_position = 100;
-			lens_position = lens_position | 0xF400;
-			addr = (lens_position & 0xFF00) >> 8;
-			lens_position = 100;
-			data = lens_position & 0xFF;
-			s_ctrl->sensor_i2c_client->i2c_func_tbl->i2c_write(
-				s_ctrl->sensor_i2c_client, addr, data,MSM_CAMERA_I2C_BYTE_DATA);
-			msleep(20);
-			s_ctrl->sensor_i2c_client->cci_client->sid =
-				s_ctrl->sensordata->slave_info->sensor_slave_addr >> 1;
-			s_ctrl->sensor_i2c_client->addr_type = temp_addr_type;
-		}
-#endif
-		//added by congshan end
 		if (s_ctrl->func_tbl->sensor_power_down) {
 			if (s_ctrl->sensordata->misc_regulator)
 				msm_sensor_misc_regulator(s_ctrl, 0);

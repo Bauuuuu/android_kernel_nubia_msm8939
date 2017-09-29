@@ -501,6 +501,12 @@ config NUBIA_LIQUID_LED
 	help
 	  if you say use aw9106b, select it.
 
+config NUBIA_LIQUID_LED_AW2013
+	tristate "aw2013 i2c led"
+	depends on I2C
+	help
+	  if you say use aw2013, select it.
+
 config LEDS_LM355x
 	tristate "LED support for LM355x Chips, LM3554 and LM3556"
 	depends on LEDS_CLASS && I2C

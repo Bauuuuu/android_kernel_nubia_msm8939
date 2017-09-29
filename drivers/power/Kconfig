@@ -568,6 +568,12 @@ config ZTEMT_COMM_CHARGE
 	help
 	  ZTEMT comm  Charge 
 
+config ZTEMT_NX513_CHARGE
+	bool "ZTEMT NX513  Charge"
+	default n
+	help
+	  ZTEMT NX513  Charge 
+
 config ZTEMT_BQ24296M_CHARGE
 	bool "ZTEMT BQ24296M Charge for NX511J"
 	default n

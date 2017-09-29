@@ -45,8 +45,12 @@
 #ifdef BQ27520_UPDATER
 #include "bqfs_cmd_type.h"
 
+#ifdef CONFIG_ZTEMT_NX513_CHARGE
+#include "bq27520_bqfs_image_nx513.h"
+#else
 #include "bq27520_bqfs_image.h"
 #include "bq27520_bqfs_image_nx512_atl.h"
+#endif
 #endif 
 
 //NUBIA_BATT
@@ -1601,6 +1605,11 @@ static int bq27520_update_bqfs(struct bq27520_chip *chip)
 	battery_id = bq_read_battery_id(chip);
 	pr_info("start check update, battery_id=%d kohm, batt_type=%s\n",battery_id,chip->battery_type);
 
+    #ifdef CONFIG_ZTEMT_NX513_CHARGE
+	chip->bqfs_version = BQFS_VERSION_NX513;
+	chip->bqfs_image = bqfs_image_2130mah;
+	chip->bqfs_image_size = ARRAY_SIZE(bqfs_image_2130mah);
+	#else
 	if(!strcmp(chip->battery_type, "ATL")){
 		chip->bqfs_version = BQFS_VERSION_NX512_ATL;
 		chip->bqfs_image = bqfs_image_nx512_atl;
@@ -1610,6 +1619,7 @@ static int bq27520_update_bqfs(struct bq27520_chip *chip)
 		chip->bqfs_image = bqfs_image_samsung;
 		chip->bqfs_image_size = ARRAY_SIZE(bqfs_image_samsung);
 	}
+    #endif
 
 	pr_info("load bqfs_version=%s\n",chip->bqfs_version);
 	

@@ -22,8 +22,8 @@
         vdd-supply = <&pm8916_l17>;
         vio-supply = <&pm8916_l6>;
         rot-matrix = /bits/ 16
-            <(0) (-1) (0)
-             (-1) (0) (0)
+            <(-1) (0) (0)
+             (0) (1) (0)
              (0) (0) (-1)>;
         g-poll-interval = <100>;
         g-min-interval = <2>;

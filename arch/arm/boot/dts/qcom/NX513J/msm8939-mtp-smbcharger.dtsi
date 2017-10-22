@@ -23,11 +23,17 @@
 			interrupts = <62 2>;
 			pinctrl-names = "default";
 			pinctrl-0 = <&smb_int_default>;
-			qcom,float-voltage-mv = <4350>;
+			qcom,smb1351-vadc = <&pm8916_vadc>;
+			qcom,smbchg-adc_tm = <&pm8916_adc_tm>;
+			qcom,using-pmic-therm;
+			qcom,float-voltage-mv = <4400>;
 			qcom,recharge-mv = <100>;
-			qcom,iterm-ma = <128>;	
+			qcom,iterm-ma = <128>;
+			qcom,adjust-max-mv = <50>;	
 			regulator-name = "smb1351_otg_vreg";
-			qcom,fastchg-current-max-ma = <3500>; 
+			qcom,fastchg-current-max-ma = <3000>; 
+			qcom,force-hvdcp-2p0;
+			qcom,complete-time-min = <768>;
 		};	
 	};
 
@@ -39,10 +45,5 @@
        pinctrl-names = "default";
        pinctrl-0 = <&usbid_default>;
        vbus_otg-supply = <&smb1351_otg_supply>;
-};
-
-&pm8916_chg {
-	status = "ok";
-	qcom,use-external-charger;
 };
 

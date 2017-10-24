@@ -1,4 +1,4 @@
-/* Copyright (c) 2009-2015, Linux Foundation. All rights reserved.
+/* Copyright (c) 2009-2014, Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -80,8 +80,6 @@
 
 #define USB_SUSPEND_DELAY_TIME	(500 * HZ/1000) /* 500 msec */
 
-#define USB_DEFAULT_SYSTEM_CLOCK 80000000	/* 80 MHz */
-
 enum msm_otg_phy_reg_mode {
 	USB_PHY_REG_OFF,
 	USB_PHY_REG_ON,
@@ -108,16 +106,6 @@ MODULE_PARM_DESC(lpm_disconnect_thresh,
 module_param(floated_charger_enable , bool, S_IRUGO | S_IWUSR);
 MODULE_PARM_DESC(floated_charger_enable,
 	"Whether to enable floated charger");
-
-/* by default debugging is enabled */
-static unsigned int enable_dbg_log = 1;
-module_param(enable_dbg_log, uint, S_IRUGO | S_IWUSR);
-MODULE_PARM_DESC(enable_dbg_log, "Debug buffer events");
-
-/* Max current to be drawn for HVDCP charger */
-static int hvdcp_max_current = IDEV_HVDCP_CHG_MAX;
-module_param(hvdcp_max_current, int, S_IRUGO|S_IWUSR);
-MODULE_PARM_DESC(hvdcp_max_current, "max current drawn for HVDCP charger");
 
 static DECLARE_COMPLETION(pmic_vbus_init);
 static struct msm_otg *the_msm_otg;
@@ -148,29 +136,6 @@ static u32 bus_freqs[USB_NUM_BUS_CLOCKS];	/* bimc, snoc, pcnoc clk */;
 static char bus_clkname[USB_NUM_BUS_CLOCKS][20] = {"bimc_clk", "snoc_clk",
 						"pcnoc_clk"};
 static bool bus_clk_rate_set;
-
-static void
-msm_otg_dbg_log_event(struct usb_phy *phy, char *event, int d1, int d2)
-{
-	struct msm_otg *motg = container_of(phy, struct msm_otg, phy);
-	unsigned long flags;
-	unsigned long long t;
-	unsigned long nanosec;
-
-	if (!enable_dbg_log)
-		return;
-
-	write_lock_irqsave(&motg->dbg_lock, flags);
-	t = cpu_clock(smp_processor_id());
-	nanosec = do_div(t, 1000000000)/1000;
-	scnprintf(motg->buf[motg->dbg_idx], DEBUG_MSG_LEN,
-			"[%5lu.%06lu]: %s :%d:%d",
-			(unsigned long)t, nanosec, event, d1, d2);
-
-	motg->dbg_idx++;
-	motg->dbg_idx = motg->dbg_idx % DEBUG_MAX_MSG;
-	write_unlock_irqrestore(&motg->dbg_lock, flags);
-}
 
 static int msm_hsusb_ldo_init(struct msm_otg *motg, int init)
 {
@@ -216,7 +181,6 @@ put_3p3_lpm:
 
 static int msm_hsusb_config_vddcx(int high)
 {
-	struct msm_otg *motg = the_msm_otg;
 	int max_vol = vdd_val[VDD_MAX];
 	int min_vol;
 	int ret;
@@ -230,7 +194,6 @@ static int msm_hsusb_config_vddcx(int high)
 	}
 
 	pr_debug("%s: min_vol:%d max_vol:%d\n", __func__, min_vol, max_vol);
-	msm_otg_dbg_log_event(&motg->phy, "CONFIG VDDCX", min_vol, max_vol);
 
 	return ret;
 }
@@ -291,28 +254,28 @@ static int msm_hsusb_ldo_enable(struct msm_otg *motg,
 		break;
 
 	case USB_PHY_REG_OFF:
-		ret = regulator_disable(hsusb_3p3);
-		if (ret) {
-			dev_err(motg->phy.dev, "%s: unable to disable the hsusb 3p3\n",
-				__func__);
-			return ret;
-		}
-
-		ret = regulator_set_optimum_mode(hsusb_3p3, 0);
-		if (ret < 0)
-			pr_err("%s: Unable to set LPM of the regulatorHSUSB_3p3\n",
-				__func__);
-
 		ret = regulator_disable(hsusb_1p8);
 		if (ret) {
 			dev_err(motg->phy.dev, "%s: unable to disable the hsusb 1p8\n",
+				__func__);
+			return ret;
+		}
+
+		ret = regulator_set_optimum_mode(hsusb_1p8, 0);
+		if (ret < 0)
+			pr_err("%s: Unable to set LPM of the regulator "
+				"HSUSB_1p8\n", __func__);
+
+		ret = regulator_disable(hsusb_3p3);
+		if (ret) {
+			dev_err(motg->phy.dev, "%s: unable to disable the hsusb 3p3\n",
 				 __func__);
 			return ret;
 		}
-		ret = regulator_set_optimum_mode(hsusb_1p8, 0);
+		ret = regulator_set_optimum_mode(hsusb_3p3, 0);
 		if (ret < 0)
-			pr_err("%s: Unable to set LPM of the regulatorHSUSB_1p8\n",
-				__func__);
+			pr_err("%s: Unable to set LPM of the regulator "
+				"HSUSB_3p3\n", __func__);
 
 		break;
 
@@ -362,7 +325,6 @@ static int msm_hsusb_ldo_enable(struct msm_otg *motg,
 	}
 
 	pr_debug("%s: USB reg mode (%d) (OFF/HPM/LPM)\n", __func__, mode);
-	msm_otg_dbg_log_event(&motg->phy, "USB REG MODE", mode, ret);
 	return ret < 0 ? ret : 0;
 }
 
@@ -470,7 +432,6 @@ static void ulpi_init(struct msm_otg *motg)
 
 		dev_vdbg(motg->phy.dev, "ulpi: write 0x%02x to 0x%02x\n",
 				seq[0], seq[1]);
-		msm_otg_dbg_log_event(&motg->phy, "ULPI WRITE", seq[0], seq[1]);
 		ulpi_write(&motg->phy, seq[0], seq[1]);
 		seq += 2;
 	}
@@ -583,8 +544,6 @@ static int msm_otg_phy_reset(struct msm_otg *motg)
 	writel(val | PORTSC_PTS_ULPI, USB_PORTSC);
 
 	dev_info(motg->phy.dev, "phy_reset: success\n");
-	msm_otg_dbg_log_event(&motg->phy, "PHY RESET SUCCESS",
-			motg->inputs, motg->phy.state);
 	return 0;
 }
 
@@ -695,21 +654,17 @@ static int msm_otg_reset(struct usb_phy *phy)
 	u32 val = 0;
 	u32 ulpi_val = 0;
 
-	msm_otg_dbg_log_event(&motg->phy, "USB RESET", phy->state,
-			get_pm_runtime_counter(phy->dev));
 	/*
 	 * USB PHY and Link reset also reset the USB BAM.
 	 * Thus perform reset operation only once to avoid
 	 * USB BAM reset on other cases e.g. USB cable disconnections.
-	 * If hardware reported error then it must be reset for recovery.
 	 */
-	if (motg->err_event_seen) {
-		dev_info(phy->dev, "performing USB h/w reset for recovery\n");
-		motg->err_event_seen = false;
-	} else if (pdata->disable_reset_on_disconnect && motg->reset_counter) {
-		return 0;
+	if (pdata->disable_reset_on_disconnect) {
+		if (motg->reset_counter)
+			return 0;
+		else
+			motg->reset_counter++;
 	}
-	motg->reset_counter++;
 
 	ret = msm_otg_phy_reset(motg);
 	if (ret) {
@@ -756,17 +711,12 @@ static int msm_otg_reset(struct usb_phy *phy)
 			ULPI_SET(ULPI_PWR_CLK_MNG_REG));
 		/* Enable PMIC pull-up */
 		pm8xxx_usb_id_pullup(1);
-		if (motg->phy_irq)
-			writeb_relaxed(USB_PHY_ID_MASK,
-				USB2_PHY_USB_PHY_INTERRUPT_MASK1);
 	}
 
 	if (motg->caps & ALLOW_VDD_MIN_WITH_RETENTION_DISABLED)
 		writel_relaxed(readl_relaxed(USB_OTGSC) & ~(OTGSC_IDPU),
 								USB_OTGSC);
 
-	msm_otg_dbg_log_event(&motg->phy, "USB RESET DONE", phy->state,
-			get_pm_runtime_counter(phy->dev));
 	return 0;
 }
 
@@ -815,7 +765,7 @@ static enum hrtimer_restart msm_otg_timer_func(struct hrtimer *hrtimer)
 	}
 
 	pr_debug("expired %s timer\n", timer_string(motg->active_tmout));
-	queue_work(motg->otg_wq, &motg->sm_work);
+	queue_work(system_nrt_wq, &motg->sm_work);
 	return HRTIMER_NORESTART;
 }
 
@@ -857,10 +807,8 @@ static int msm_otg_start_hnp(struct usb_otg *otg)
 	}
 
 	pr_debug("A-Host: HNP initiated\n");
-	msm_otg_dbg_log_event(&motg->phy, "A_HOST: HNP INITIATED",
-			motg->inputs, otg->phy->state);
 	clear_bit(A_BUS_REQ, &motg->inputs);
-	queue_work(motg->otg_wq, &motg->sm_work);
+	queue_work(system_nrt_wq, &motg->sm_work);
 	return 0;
 }
 
@@ -885,8 +833,6 @@ static int msm_otg_start_srp(struct usb_otg *otg)
 	}
 
 	pr_debug("B-Device SRP started\n");
-	msm_otg_dbg_log_event(&motg->phy, "B_DEVICE: SRP STARTED",
-			motg->inputs, otg->phy->state);
 
 	/*
 	 * PHY won't pull D+ high unless it detects Vbus valid.
@@ -925,7 +871,6 @@ static void msm_otg_host_hnp_enable(struct usb_otg *otg, bool enable)
 	}
 }
 
-#define HOST_SUSPEND_WQ_TIMEOUT_MS	msecs_to_jiffies(2000) /* 2 seconds */
 static int msm_otg_set_suspend(struct usb_phy *phy, int suspend)
 {
 	struct msm_otg *motg = container_of(phy, struct msm_otg, phy);
@@ -935,7 +880,6 @@ static int msm_otg_set_suspend(struct usb_phy *phy, int suspend)
 
 	pr_debug("%s(%d) in %s state\n", __func__, suspend,
 				usb_otg_state_string(phy->state));
-	msm_otg_dbg_log_event(phy, "SET SUSPEND", suspend, phy->state);
 
 	/*
 	 * UDC and HCD call usb_phy_set_suspend() to enter/exit LPM
@@ -951,32 +895,23 @@ static int msm_otg_set_suspend(struct usb_phy *phy, int suspend)
 			/* fall through */
 		case OTG_STATE_A_HOST:
 			pr_debug("host bus suspend\n");
-			msm_otg_dbg_log_event(phy, "HOST BUS SUSPEND",
-					motg->inputs, phy->state);
 			clear_bit(A_BUS_REQ, &motg->inputs);
 			if (!atomic_read(&motg->in_lpm) &&
-				!test_bit(ID, &motg->inputs)) {
-				queue_work(motg->otg_wq, &motg->sm_work);
-				/*
-				 * wake up would happen from msm_otg_suspend
-				 * or remove hcd.
+					!test_bit(ID, &motg->inputs)) {
+				queue_work(system_nrt_wq, &motg->sm_work);
+				/* Flush sm_work to avoid it race with
+				 * subsequent calls of set_suspend.
 				 */
-				wait_event_interruptible_timeout(
-					motg->host_suspend_wait,
-					(atomic_read(&motg->in_lpm)
-					|| test_bit(ID, &motg->inputs)),
-					HOST_SUSPEND_WQ_TIMEOUT_MS);
+				flush_work(&motg->sm_work);
 			}
 			break;
 		case OTG_STATE_B_PERIPHERAL:
 			pr_debug("peripheral bus suspend\n");
-			msm_otg_dbg_log_event(phy, "PERIPHERAL BUS SUSPEND",
-					motg->inputs, phy->state);
 			if (!(motg->caps & ALLOW_LPM_ON_DEV_SUSPEND))
 				break;
 			set_bit(A_BUS_SUSPEND, &motg->inputs);
 			if (!atomic_read(&motg->in_lpm))
-				queue_delayed_work(motg->otg_wq,
+				queue_delayed_work(system_nrt_wq,
 					&motg->suspend_work,
 					USB_SUSPEND_DELAY_TIME);
 			break;
@@ -1004,13 +939,11 @@ static int msm_otg_set_suspend(struct usb_phy *phy, int suspend)
 			break;
 		case OTG_STATE_B_PERIPHERAL:
 			pr_debug("peripheral bus resume\n");
-			msm_otg_dbg_log_event(phy, "PERIPHERAL BUS RESUME",
-					motg->inputs, phy->state);
 			if (!(motg->caps & ALLOW_LPM_ON_DEV_SUSPEND))
 				break;
 			clear_bit(A_BUS_SUSPEND, &motg->inputs);
 			if (atomic_read(&motg->in_lpm))
-				queue_work(motg->otg_wq, &motg->sm_work);
+				queue_work(system_nrt_wq, &motg->sm_work);
 			break;
 		default:
 			break;
@@ -1051,8 +984,6 @@ static int msm_otg_bus_freq_get(struct device *dev, struct msm_otg *motg)
 		}
 		pr_debug("%s set at %lu Hz\n", bus_clkname[i],
 			clk_get_rate(motg->bus_clks[i]));
-		msm_otg_dbg_log_event(&motg->phy, "OTG BUS FREQ SET",
-				i, bus_freqs[i]);
 	}
 	bus_clk_rate_set = true;
 	return 0;
@@ -1098,7 +1029,6 @@ static void msm_otg_bus_vote(struct msm_otg *motg, enum usb_bus_vote vote)
 	int ret;
 	struct msm_otg_platform_data *pdata = motg->pdata;
 
-	msm_otg_dbg_log_event(&motg->phy, "BUS VOTE", vote, motg->phy.state);
 	/* Check if target allows min_vote to be same as no_vote */
 	if (pdata->bus_scale_table &&
 	    vote >= pdata->bus_scale_table->num_usecases)
@@ -1123,8 +1053,7 @@ static void msm_otg_enable_phy_hv_int(struct msm_otg *motg)
 	bool dp_dm_hv_int = false;
 	u32 val;
 
-	if (motg->pdata->otg_control == OTG_PHY_CONTROL ||
-				motg->phy_irq)
+	if (motg->pdata->otg_control == OTG_PHY_CONTROL)
 		bsv_id_hv_int = true;
 	if (motg->host_bus_suspend || motg->device_bus_suspend)
 		dp_dm_hv_int = true;
@@ -1156,10 +1085,6 @@ static void msm_otg_enable_phy_hv_int(struct msm_otg *motg)
 	default:
 		break;
 	}
-	pr_debug("%s: bsv_id_hv = %d dp_dm_hv_int = %d\n",
-			__func__, bsv_id_hv_int, dp_dm_hv_int);
-	msm_otg_dbg_log_event(&motg->phy, "PHY HV INTR ENABLED",
-			bsv_id_hv_int, dp_dm_hv_int);
 }
 
 static void msm_otg_disable_phy_hv_int(struct msm_otg *motg)
@@ -1168,8 +1093,7 @@ static void msm_otg_disable_phy_hv_int(struct msm_otg *motg)
 	bool dp_dm_hv_int = false;
 	u32 val;
 
-	if (motg->pdata->otg_control == OTG_PHY_CONTROL ||
-				motg->phy_irq)
+	if (motg->pdata->otg_control == OTG_PHY_CONTROL)
 		bsv_id_hv_int = true;
 	if (motg->host_bus_suspend || motg->device_bus_suspend)
 		dp_dm_hv_int = true;
@@ -1202,10 +1126,6 @@ static void msm_otg_disable_phy_hv_int(struct msm_otg *motg)
 	default:
 		break;
 	}
-	pr_debug("%s: bsv_id_hv = %d dp_dm_hv_int = %d\n",
-			__func__, bsv_id_hv_int, dp_dm_hv_int);
-	msm_otg_dbg_log_event(&motg->phy, "PHY HV INTR DISABLED",
-			bsv_id_hv_int, dp_dm_hv_int);
 }
 
 static void msm_otg_enter_phy_retention(struct msm_otg *motg)
@@ -1227,9 +1147,6 @@ static void msm_otg_enter_phy_retention(struct msm_otg *motg)
 	default:
 		break;
 	}
-	pr_debug("USB PHY is in retention\n");
-	msm_otg_dbg_log_event(&motg->phy, "USB PHY ENTER RETENTION",
-			motg->pdata->phy_type, 0);
 }
 
 static void msm_otg_exit_phy_retention(struct msm_otg *motg)
@@ -1252,36 +1169,10 @@ static void msm_otg_exit_phy_retention(struct msm_otg *motg)
 	default:
 		break;
 	}
-	pr_debug("USB PHY is exited from retention\n");
-	msm_otg_dbg_log_event(&motg->phy, "USB PHY EXIT RETENTION",
-			motg->pdata->phy_type, 0);
 }
 
-static void msm_id_status_w(struct work_struct *w);
-static irqreturn_t msm_otg_phy_irq_handler(int irq, void *data)
-{
-	struct msm_otg *motg = data;
-
-	msm_otg_dbg_log_event(&motg->phy, "PHY ID IRQ",
-			atomic_read(&motg->in_lpm), motg->phy.state);
-	if (atomic_read(&motg->in_lpm)) {
-		pr_debug("PHY ID IRQ in LPM\n");
-		motg->phy_irq_pending = true;
-		if (!atomic_read(&motg->pm_suspended))
-			pm_request_resume(motg->phy.dev);
-	} else {
-		pr_debug("PHY ID IRQ outside LPM\n");
-		msm_id_status_w(&motg->id_status_work.work);
-	}
-
-	return IRQ_HANDLED;
-}
-
-#define PHY_SUSPEND_TIMEOUT_USEC (5 * 1000)
-#define PHY_DEVICE_BUS_SUSPEND_TIMEOUT_USEC 100
+#define PHY_SUSPEND_TIMEOUT_USEC	(500 * 1000)
 #define PHY_RESUME_TIMEOUT_USEC	(100 * 1000)
-
-#define PHY_SUSPEND_RETRIES_MAX 3
 
 #ifdef CONFIG_PM_SLEEP
 static int msm_otg_suspend(struct msm_otg *motg)
@@ -1295,12 +1186,10 @@ static int msm_otg_suspend(struct msm_otg *motg)
 	u32 cmd_val;
 	u32 portsc, config2;
 	u32 func_ctrl;
-	int phcd_retry_cnt = 0, ret;
-	unsigned phy_suspend_timeout;
+	int phcd_retry_cnt = 0;
 
+phcd_retry:
 	cnt = 0;
-	msm_otg_dbg_log_event(phy, "LPM ENTER START",
-			motg->inputs, phy->state);
 
 	if (atomic_read(&motg->in_lpm))
 		return 0;
@@ -1311,14 +1200,12 @@ static int msm_otg_suspend(struct msm_otg *motg)
 	 * accesses USB bam registers as part of disconnecting bam pipes.
 	 */
 	if (!msm_bam_usb_lpm_ok(CI_CTRL)) {
-		msm_otg_dbg_log_event(phy, "BAM NOT READY", 0, 0);
 		pm_schedule_suspend(phy->dev, 1000);
 		return -EBUSY;
 	}
 
 	motg->ui_enabled = 0;
 	disable_irq(motg->irq);
-lpm_start:
 	host_bus_suspend = !test_bit(MHL, &motg->inputs) && phy->otg->host &&
 		!test_bit(ID, &motg->inputs);
 	device_bus_suspend = phy->otg->gadget && test_bit(ID, &motg->inputs) &&
@@ -1353,8 +1240,6 @@ lpm_start:
 	if ((test_bit(B_SESS_VLD, &motg->inputs) && !device_bus_suspend &&
 		!dcp && !prop_charger && !floated_charger) ||
 		test_bit(A_BUS_REQ, &motg->inputs) || sm_work_busy) {
-		msm_otg_dbg_log_event(phy, "LPM ENTER ABORTED",
-				motg->inputs, motg->chg_type);
 		if (test_bit(A_BUS_REQ, &motg->inputs))
 			motg->pm_done = 1;
 		motg->ui_enabled = 1;
@@ -1362,8 +1247,7 @@ lpm_start:
 		return -EBUSY;
 	}
 
-	if (motg->caps & ALLOW_VDD_MIN_WITH_RETENTION_DISABLED ||
-		(!host_bus_suspend && !device_bus_suspend)) {
+	if (motg->caps & ALLOW_VDD_MIN_WITH_RETENTION_DISABLED) {
 		/* put the controller in non-driving mode */
 		func_ctrl = ulpi_read(phy, ULPI_FUNC_CTRL);
 		func_ctrl &= ~ULPI_FUNC_CTRL_OPMODE_MASK;
@@ -1373,39 +1257,16 @@ lpm_start:
 						ULPI_CLR(ULPI_IFC_CTRL));
 	}
 
-	/*
-	 * PHY suspend sequence as mentioned in the databook.
-	 *
-	 * Device bus suspend: The controller may abort PHY suspend if
-	 * there is an incoming reset or resume from the host. If PHCD
-	 * is not set within 100 usec. Abort the LPM sequence.
-	 *
-	 * Host bus suspend: If the peripheral is attached, PHY is already
-	 * put into suspend along with the peripheral bus suspend. poll for
-	 * PHCD upto 5 msec. If the peripheral is not attached i.e entering
-	 * LPM with Micro-A cable, set the PHCD and poll for it for 5 msec.
-	 *
-	 * No cable connected: Set the PHCD to suspend the PHY. Poll for PHCD
-	 * upto 5 msec.
-	 *
-	 * The controller aborts PHY suspend only in device bus suspend case.
-	 * In other cases, it is observed that PHCD may not get set within
-	 * the timeout. If so, set the PHCD again and poll for it before
-	 * reset recovery.
+	/* Set the PHCD bit, only if it is not set by the controller.
+	 * PHY may take some time or even fail to enter into low power
+	 * mode (LPM). Hence poll for 500 msec and reset the PHY and link
+	 * in failure case.
 	 */
-
-phcd_retry:
-	if (device_bus_suspend)
-		phy_suspend_timeout = PHY_DEVICE_BUS_SUSPEND_TIMEOUT_USEC;
-	else
-		phy_suspend_timeout = PHY_SUSPEND_TIMEOUT_USEC;
-
-	cnt = 0;
 	portsc = readl_relaxed(USB_PORTSC);
 	if (!(portsc & PORTSC_PHCD)) {
 		writel_relaxed(portsc | PORTSC_PHCD,
 				USB_PORTSC);
-		while (cnt < phy_suspend_timeout) {
+		while (cnt < PHY_SUSPEND_TIMEOUT_USEC) {
 			if (readl_relaxed(USB_PORTSC) & PORTSC_PHCD)
 				break;
 			udelay(1);
@@ -1413,31 +1274,16 @@ phcd_retry:
 		}
 	}
 
-	if (cnt >= phy_suspend_timeout) {
-		if (phcd_retry_cnt > PHY_SUSPEND_RETRIES_MAX) {
-			msm_otg_dbg_log_event(phy, "PHY SUSPEND FAILED",
-				phcd_retry_cnt, phy->state);
-			dev_err(phy->dev, "PHY suspend failed\n");
-			ret = -EBUSY;
-			goto phy_suspend_fail;
-		}
-
-		if (device_bus_suspend) {
-			dev_dbg(phy->dev, "PHY suspend aborted\n");
-			ret = -EBUSY;
-			goto phy_suspend_fail;
-		} else {
-			if (phcd_retry_cnt++ < PHY_SUSPEND_RETRIES_MAX) {
-				dev_dbg(phy->dev, "PHY suspend retry\n");
-				goto phcd_retry;
-			} else {
-				dev_err(phy->dev, "reset attempt during PHY suspend\n");
-				phcd_retry_cnt++;
-				motg->reset_counter = 0;
-				msm_otg_reset(phy);
-				goto lpm_start;
-			}
-		}
+	if (cnt >= PHY_SUSPEND_TIMEOUT_USEC) {
+		dev_err(phy->dev, "Unable to suspend PHY\n");
+		motg->reset_counter = 0;
+		msm_otg_reset(phy);
+		motg->ui_enabled = 1;
+		enable_irq(motg->irq);
+		if (phcd_retry_cnt++ < 3)
+			goto phcd_retry;
+		else
+			return -EBUSY;
 	}
 
 	/*
@@ -1580,8 +1426,6 @@ phcd_retry:
 		else
 			enable_irq_wake(motg->irq);
 
-		if (motg->phy_irq)
-			enable_irq_wake(motg->phy_irq);
 		if (motg->pdata->pmic_id_irq)
 			enable_irq_wake(motg->pdata->pmic_id_irq);
 		if (motg->ext_id_irq)
@@ -1602,8 +1446,6 @@ phcd_retry:
 	msm_otg_bus_vote(motg, USB_NO_PERF_VOTE);
 
 	atomic_set(&motg->in_lpm, 1);
-	wake_up(&motg->host_suspend_wait);
-
 	/* Enable ASYNC IRQ (if present) during LPM */
 	if (motg->async_irq)
 		enable_irq(motg->async_irq);
@@ -1613,20 +1455,15 @@ phcd_retry:
 		motg->ui_enabled = 1;
 		enable_irq(motg->irq);
 	}
+	/* if ID is not ground, that means usb A-plug is not attached, so release wakelock */
+	if (test_bit(ID, &motg->inputs))
 	wake_unlock(&motg->wlock);
 
 	dev_dbg(phy->dev, "LPM caps = %lu flags = %lu\n",
 			motg->caps, motg->lpm_flags);
 	dev_info(phy->dev, "USB in low power mode\n");
-	msm_otg_dbg_log_event(phy, "LPM ENTER DONE",
-			motg->caps, motg->lpm_flags);
 
 	return 0;
-
-phy_suspend_fail:
-	motg->ui_enabled = 1;
-	enable_irq(motg->irq);
-	return ret;
 }
 
 static int msm_otg_resume(struct msm_otg *motg)
@@ -1643,12 +1480,8 @@ static int msm_otg_resume(struct msm_otg *motg)
 	bool is_remote_wakeup;
 	u32 func_ctrl;
 
-	msm_otg_dbg_log_event(phy, "LPM EXIT START", motg->inputs, phy->state);
-	if (!atomic_read(&motg->in_lpm)) {
-		msm_otg_dbg_log_event(phy, "USB NOT IN LPM",
-				atomic_read(&motg->in_lpm), phy->state);
+	if (!atomic_read(&motg->in_lpm))
 		return 0;
-	}
 
 	msm_bam_notify_lpm_resume(CI_CTRL);
 
@@ -1656,6 +1489,8 @@ static int msm_otg_resume(struct msm_otg *motg)
 		motg->ui_enabled = 0;
 		disable_irq(motg->irq);
 	}
+	/* hold wakelock only if wakelock is not active, which means wake_lock is not called before */
+	if (!wake_lock_active(&motg->wlock))
 	wake_lock(&motg->wlock);
 
 	/*
@@ -1768,8 +1603,7 @@ static int msm_otg_resume(struct msm_otg *motg)
 	}
 
 skip_phy_resume:
-	if (motg->caps & ALLOW_VDD_MIN_WITH_RETENTION_DISABLED ||
-		(!motg->host_bus_suspend && !motg->device_bus_suspend)) {
+	if (motg->caps & ALLOW_VDD_MIN_WITH_RETENTION_DISABLED) {
 		/* put the controller in normal mode */
 		func_ctrl = ulpi_read(phy, ULPI_FUNC_CTRL);
 		func_ctrl &= ~ULPI_FUNC_CTRL_OPMODE_MASK;
@@ -1783,8 +1617,6 @@ skip_phy_resume:
 		else
 			disable_irq_wake(motg->irq);
 
-		if (motg->phy_irq)
-			disable_irq_wake(motg->phy_irq);
 		if (motg->pdata->pmic_id_irq)
 			disable_irq_wake(motg->pdata->pmic_id_irq);
 		if (motg->ext_id_irq)
@@ -1818,17 +1650,10 @@ skip_phy_resume:
 	if (motg->async_irq)
 		disable_irq(motg->async_irq);
 
-	if (motg->phy_irq_pending) {
-		motg->phy_irq_pending = false;
-		msm_id_status_w(&motg->id_status_work.work);
-	}
-
 	if (motg->host_bus_suspend)
 		usb_hcd_resume_root_hub(hcd);
 
 	dev_info(phy->dev, "USB exited from low power mode\n");
-	msm_otg_dbg_log_event(phy, "LPM EXIT DONE",
-			motg->caps, motg->lpm_flags);
 
 	return 0;
 }
@@ -1896,8 +1721,6 @@ static int msm_otg_notify_chg_type(struct msm_otg *motg)
 	}
 
 	pr_debug("setting usb power supply type %d\n", charger_type);
-	msm_otg_dbg_log_event(&motg->phy, "SET USB PWR SUPPLY TYPE",
-			motg->chg_type, charger_type);
 	power_supply_set_supply_type(psy, charger_type);
 	return 0;
 }
@@ -1980,8 +1803,6 @@ static void msm_otg_notify_charger(struct msm_otg *motg, unsigned mA)
 		return;
 
 	dev_info(motg->phy.dev, "Avail curr from USB = %u\n", mA);
-	msm_otg_dbg_log_event(&motg->phy, "AVAIL CURR FROM USB",
-			mA, motg->chg_type);
 
 	/*
 	 *  Use Power Supply API if supported, otherwise fallback
@@ -2023,8 +1844,6 @@ static void msm_otg_start_host(struct usb_otg *otg, int on)
 
 	if (on) {
 		dev_dbg(otg->phy->dev, "host on\n");
-		msm_otg_dbg_log_event(&motg->phy, "HOST ON",
-				motg->inputs, otg->phy->state);
 
 		if (pdata->otg_control == OTG_PHY_CONTROL)
 			ulpi_write(otg->phy, OTG_COMP_DISABLE,
@@ -2033,10 +1852,7 @@ static void msm_otg_start_host(struct usb_otg *otg, int on)
 		usb_add_hcd(hcd, hcd->irq, IRQF_SHARED);
 	} else {
 		dev_dbg(otg->phy->dev, "host off\n");
-		msm_otg_dbg_log_event(&motg->phy, "HOST OFF",
-				motg->inputs, otg->phy->state);
 
-		wake_up(&motg->host_suspend_wait);
 		usb_remove_hcd(hcd);
 		/* HCD core reset all bits of PORTSC. select ULPI phy */
 		writel_relaxed(0x80000000, USB_PORTSC);
@@ -2074,8 +1890,6 @@ static int msm_otg_usbdev_notify(struct notifier_block *self,
 			usb_disable_autosuspend(udev);
 		if (otg->phy->state == OTG_STATE_A_WAIT_BCON) {
 			pr_debug("B_CONN set\n");
-			msm_otg_dbg_log_event(&motg->phy, "B_CONN SET",
-					motg->inputs, otg->phy->state);
 			set_bit(B_CONN, &motg->inputs);
 			msm_otg_del_timer(motg);
 			otg->phy->state = OTG_STATE_A_HOST;
@@ -2100,8 +1914,6 @@ static int msm_otg_usbdev_notify(struct notifier_block *self,
 		if ((otg->phy->state == OTG_STATE_A_HOST) ||
 			(otg->phy->state == OTG_STATE_A_SUSPEND)) {
 			pr_debug("B_CONN clear\n");
-			msm_otg_dbg_log_event(&motg->phy, "B_CONN CLEAR",
-					motg->inputs, otg->phy->state);
 			clear_bit(B_CONN, &motg->inputs);
 			/*
 			 * OTG PET: A-device must end session after
@@ -2113,7 +1925,7 @@ static int msm_otg_usbdev_notify(struct notifier_block *self,
 				udev->bus->otg_vbus_off = 0;
 				set_bit(A_BUS_DROP, &motg->inputs);
 			}
-			queue_work(motg->otg_wq, &motg->sm_work);
+			queue_work(system_nrt_wq, &motg->sm_work);
 		}
 	default:
 		break;
@@ -2130,7 +1942,6 @@ static void msm_hsusb_vbus_power(struct msm_otg *motg, bool on)
 	int ret;
 	static bool vbus_is_on;
 
-	msm_otg_dbg_log_event(&motg->phy, "VBUS POWER", on, vbus_is_on);
 	if (vbus_is_on == on)
 		return;
 
@@ -2188,9 +1999,6 @@ static int msm_otg_set_host(struct usb_otg *otg, struct usb_bus *host)
 	if (!motg->pdata->vbus_power && host) {
 		vbus_otg = devm_regulator_get(motg->phy.dev, "vbus_otg");
 		if (IS_ERR(vbus_otg)) {
-			msm_otg_dbg_log_event(&motg->phy,
-					"UNABLE TO GET VBUS_OTG",
-					otg->phy->state, 0);
 			pr_err("Unable to get vbus_otg\n");
 			return PTR_ERR(vbus_otg);
 		}
@@ -2204,7 +2012,7 @@ static int msm_otg_set_host(struct usb_otg *otg, struct usb_bus *host)
 			msm_hsusb_vbus_power(motg, 0);
 			otg->host = NULL;
 			otg->phy->state = OTG_STATE_UNDEFINED;
-			queue_work(motg->otg_wq, &motg->sm_work);
+			queue_work(system_nrt_wq, &motg->sm_work);
 		} else {
 			otg->host = NULL;
 		}
@@ -2222,18 +2030,14 @@ static int msm_otg_set_host(struct usb_otg *otg, struct usb_bus *host)
 	usb_register_notify(&motg->usbdev_nb);
 	otg->host = host;
 	dev_dbg(otg->phy->dev, "host driver registered w/ tranceiver\n");
-	msm_otg_dbg_log_event(&motg->phy, "HOST DRIVER REGISTERED",
-			hcd->power_budget, motg->pdata->mode);
 
 	/*
 	 * Kick the state machine work, if peripheral is not supported
 	 * or peripheral is already registered with us.
 	 */
 	if (motg->pdata->mode == USB_HOST || otg->gadget) {
-		msm_otg_dbg_log_event(&motg->phy, "PM RUNTIME: HOST GET",
-				get_pm_runtime_counter(otg->phy->dev), 0);
 		pm_runtime_get_sync(otg->phy->dev);
-		queue_work(motg->otg_wq, &motg->sm_work);
+		queue_work(system_nrt_wq, &motg->sm_work);
 	}
 
 	return 0;
@@ -2251,8 +2055,6 @@ static void msm_otg_start_peripheral(struct usb_otg *otg, int on)
 
 	if (on) {
 		dev_dbg(otg->phy->dev, "gadget on\n");
-		msm_otg_dbg_log_event(&motg->phy, "GADGET ON",
-				motg->inputs, otg->phy->state);
 
 		/* Configure BUS performance parameters for MAX bandwidth */
 		if (debug_bus_voting_enabled)
@@ -2287,8 +2089,6 @@ static void msm_otg_start_peripheral(struct usb_otg *otg, int on)
 		}
 	} else {
 		dev_dbg(otg->phy->dev, "gadget off\n");
-		msm_otg_dbg_log_event(&motg->phy, "GADGET OFF",
-			motg->inputs, otg->phy->state);
 		usb_gadget_vbus_disconnect(otg->gadget);
 		/* Configure BUS performance parameters to default */
 		msm_otg_bus_vote(motg, USB_MIN_PERF_VOTE);
@@ -2325,14 +2125,11 @@ static int msm_otg_set_peripheral(struct usb_otg *otg,
 
 	if (!gadget) {
 		if (otg->phy->state == OTG_STATE_B_PERIPHERAL) {
-			msm_otg_dbg_log_event(&motg->phy,
-				"PM RUNTIME: PERIPHERAL GET1",
-				get_pm_runtime_counter(otg->phy->dev), 0);
 			pm_runtime_get_sync(otg->phy->dev);
 			msm_otg_start_peripheral(otg, 0);
 			otg->gadget = NULL;
 			otg->phy->state = OTG_STATE_UNDEFINED;
-			queue_work(motg->otg_wq, &motg->sm_work);
+			queue_work(system_nrt_wq, &motg->sm_work);
 		} else {
 			otg->gadget = NULL;
 		}
@@ -2341,18 +2138,14 @@ static int msm_otg_set_peripheral(struct usb_otg *otg,
 	}
 	otg->gadget = gadget;
 	dev_dbg(otg->phy->dev, "peripheral driver registered w/ tranceiver\n");
-	msm_otg_dbg_log_event(&motg->phy, "PERIPHERAL DRIVER REGISTERED",
-			otg->phy->state, motg->pdata->mode);
 
 	/*
 	 * Kick the state machine work, if host is not supported
 	 * or host is already registered with us.
 	 */
 	if (motg->pdata->mode == USB_PERIPHERAL || otg->host) {
-		msm_otg_dbg_log_event(&motg->phy, "PM RUNTIME: PERIPHERAL GET2",
-				get_pm_runtime_counter(otg->phy->dev), 0);
 		pm_runtime_get_sync(otg->phy->dev);
-		queue_work(motg->otg_wq, &motg->sm_work);
+		queue_work(system_nrt_wq, &motg->sm_work);
 	}
 
 	return 0;
@@ -2376,31 +2169,6 @@ static bool msm_otg_read_pmic_id_state(struct msm_otg *motg)
 	 * host mode unnecessarily.
 	 */
 	return !!id;
-}
-
-static bool msm_otg_read_phy_id_state(struct msm_otg *motg)
-{
-	u8 val;
-
-	/*
-	 * clear the pending/outstanding interrupts and
-	 * read the ID status from the SRC_STATUS register.
-	 */
-	writeb_relaxed(USB_PHY_ID_MASK, USB2_PHY_USB_PHY_INTERRUPT_CLEAR1);
-
-	writeb_relaxed(0x1, USB2_PHY_USB_PHY_IRQ_CMD);
-	/*
-	 * Databook says 200 usec delay is required for
-	 * clearing the interrupts.
-	 */
-	udelay(200);
-	writeb_relaxed(0x0, USB2_PHY_USB_PHY_IRQ_CMD);
-
-	val = readb_relaxed(USB2_PHY_USB_PHY_INTERRUPT_SRC_STATUS);
-	if (val & USB_PHY_IDDIG_1_0)
-		return false; /* ID is grounded */
-	else
-		return true;
 }
 
 static int msm_otg_mhl_register_callback(struct msm_otg *motg,
@@ -2516,10 +2284,8 @@ static void msm_otg_chg_check_timer_func(unsigned long data)
 
 	if ((readl_relaxed(USB_PORTSC) & PORTSC_LS) == PORTSC_LS) {
 		dev_dbg(otg->phy->dev, "DCP is detected as SDP\n");
-		msm_otg_dbg_log_event(&motg->phy, "DCP IS DETECTED AS SDP",
-				otg->phy->state, 0);
 		set_bit(B_FALSE_SDP, &motg->inputs);
-		queue_work(motg->otg_wq, &motg->sm_work);
+		queue_work(system_nrt_wq, &motg->sm_work);
 	}
 }
 
@@ -2682,8 +2448,6 @@ static void msm_otg_id_timer_func(unsigned long data)
 
 	if (atomic_read(&motg->in_lpm)) {
 		dev_dbg(motg->phy.dev, "timer: in lpm\n");
-		msm_otg_dbg_log_event(&motg->phy, "ID TIMER: IN LPM",
-				motg->phy.state, 0);
 		return;
 	}
 
@@ -2692,7 +2456,7 @@ static void msm_otg_id_timer_func(unsigned long data)
 
 	if (msm_chg_check_aca_intr(motg)) {
 		dev_dbg(motg->phy.dev, "timer: aca work\n");
-		queue_work(motg->otg_wq, &motg->sm_work);
+		queue_work(system_nrt_wq, &motg->sm_work);
 	}
 
 out:
@@ -2930,16 +2694,12 @@ static void msm_chg_detect_work(struct work_struct *w)
 	unsigned long delay;
 
 	dev_dbg(phy->dev, "chg detection work\n");
-	msm_otg_dbg_log_event(phy, "CHG DETECTION WORK",
-			motg->chg_state, phy->state);
 
 	if (test_bit(MHL, &motg->inputs)) {
 		dev_dbg(phy->dev, "detected MHL, escape chg detection work\n");
 		return;
 	}
 
-	/* resume the device first if at all it resumes */
-	pm_runtime_resume(phy->dev);
 	switch (motg->chg_state) {
 	case USB_CHG_STATE_UNDEFINED:
 		msm_chg_block_on(motg);
@@ -2954,7 +2714,7 @@ static void msm_chg_detect_work(struct work_struct *w)
 			msm_chg_block_off(motg);
 			motg->chg_state = USB_CHG_STATE_DETECTED;
 			motg->chg_type = USB_INVALID_CHARGER;
-			queue_work(motg->otg_wq, &motg->sm_work);
+			queue_work(system_nrt_wq, &motg->sm_work);
 			return;
 		}
 		is_aca = msm_chg_aca_detect(motg);
@@ -3063,9 +2823,7 @@ static void msm_chg_detect_work(struct work_struct *w)
 
 		dev_dbg(phy->dev, "chg_type = %s\n",
 			chg_to_string(motg->chg_type));
-		msm_otg_dbg_log_event(phy, "CHG WORK: CHG_TYPE",
-				motg->chg_type, motg->inputs);
-		queue_work(motg->otg_wq, &motg->sm_work);
+		queue_work(system_nrt_wq, &motg->sm_work);
 #ifdef CONFIG_ZTEMT_BQ24296M_CHARGE
 		bq24296_notify_charger(motg->chg_type);
 #endif
@@ -3074,8 +2832,7 @@ static void msm_chg_detect_work(struct work_struct *w)
 		return;
 	}
 
-	msm_otg_dbg_log_event(phy, "CHG WORK: QUEUE", motg->chg_type, delay);
-	queue_delayed_work(motg->otg_wq, &motg->chg_work, delay);
+	queue_delayed_work(system_nrt_wq, &motg->chg_work, delay);
 }
 
 #define VBUS_INIT_TIMEOUT	msecs_to_jiffies(5000)
@@ -3127,11 +2884,6 @@ static void msm_otg_init_sm(struct msm_otg *motg)
 					set_bit(ID, &motg->inputs);
 				else
 					clear_bit(ID, &motg->inputs);
-			} else if (motg->phy_irq) {
-				if (msm_otg_read_phy_id_state(motg))
-					set_bit(ID, &motg->inputs);
-				else
-					clear_bit(ID, &motg->inputs);
 			}
 			/*
 			 * VBUS initial state is reported after PMIC
@@ -3142,9 +2894,6 @@ static void msm_otg_init_sm(struct msm_otg *motg)
 			if (!ret) {
 				dev_dbg(motg->phy.dev, "%s: timeout waiting for PMIC VBUS\n",
 					__func__);
-				msm_otg_dbg_log_event(&motg->phy,
-						"PMIC VBUS WAIT TMOUT",
-						motg->inputs, motg->phy.state);
 				clear_bit(B_SESS_VLD, &motg->inputs);
 				pmic_vbus_init.done = 1;
 			}
@@ -3170,9 +2919,6 @@ static void msm_otg_init_sm(struct msm_otg *motg)
 			if (!ret) {
 				dev_dbg(motg->phy.dev, "%s: timeout waiting for PMIC VBUS\n",
 					__func__);
-				msm_otg_dbg_log_event(&motg->phy,
-						"PMIC VBUS WAIT TMOUT",
-						motg->inputs, motg->phy.state);
 				clear_bit(B_SESS_VLD, &motg->inputs);
 				pmic_vbus_init.done = 1;
 			}
@@ -3183,10 +2929,7 @@ static void msm_otg_init_sm(struct msm_otg *motg)
 		break;
 	default:
 		break;
-	msm_otg_dbg_log_event(&motg->phy, "SM INIT", pdata->mode, motg->inputs);
 	}
-	motg->id_state = (test_bit(ID, &motg->inputs)) ? USB_ID_FLOAT :
-							USB_ID_GROUND;
 }
 
 static void msm_otg_wait_for_ext_chg_done(struct msm_otg *motg)
@@ -3203,12 +2946,9 @@ static void msm_otg_wait_for_ext_chg_done(struct msm_otg *motg)
 
 do_wait:
 		pr_debug("before msm_otg ext chg wait\n");
-		msm_otg_dbg_log_event(&motg->phy, "EXT CHG: WAIT", 0, 0);
 
 		t = wait_for_completion_timeout(&motg->ext_chg_wait,
 				msecs_to_jiffies(3000));
-		msm_otg_dbg_log_event(&motg->phy, "EXT CHG: DONE", t, 0);
-
 		if (!t)
 			pr_err("msm_otg ext chg wait timeout\n");
 		else if (motg->ext_chg_active == ACTIVE)
@@ -3238,14 +2978,10 @@ static void msm_otg_sm_work(struct work_struct *w)
 
 	pm_runtime_resume(otg->phy->dev);
 	if (motg->pm_done) {
-		msm_otg_dbg_log_event(&motg->phy, "PM RUNTIME: USBCONN GET",
-			get_pm_runtime_counter(otg->phy->dev), motg->pm_done);
 		pm_runtime_get_sync(otg->phy->dev);
 		motg->pm_done = 0;
 	}
 	pr_debug("%s work\n", usb_otg_state_string(otg->phy->state));
-	msm_otg_dbg_log_event(&motg->phy, "SM WORK:",
-			otg->phy->state, motg->inputs);
 	switch (otg->phy->state) {
 	case OTG_STATE_UNDEFINED:
 		msm_otg_reset(otg->phy);
@@ -3260,9 +2996,6 @@ static void msm_otg_sm_work(struct work_struct *w)
 		otg->phy->state = OTG_STATE_B_IDLE;
 		if (!test_bit(B_SESS_VLD, &motg->inputs) &&
 				test_bit(ID, &motg->inputs)) {
-			msm_otg_dbg_log_event(&motg->phy,
-				"PM RUNTIME: UNDEF PUT",
-				get_pm_runtime_counter(otg->phy->dev), 0);
 			pm_runtime_put_noidle(otg->phy->dev);
 			pm_runtime_suspend(otg->phy->dev);
 			break;
@@ -3271,15 +3004,11 @@ static void msm_otg_sm_work(struct work_struct *w)
 	case OTG_STATE_B_IDLE:
 		if (test_bit(MHL, &motg->inputs)) {
 			/* allow LPM */
-			msm_otg_dbg_log_event(&motg->phy, "PM RUNTIME: MHL PUT",
-				get_pm_runtime_counter(otg->phy->dev), 0);
 			pm_runtime_put_noidle(otg->phy->dev);
 			pm_runtime_suspend(otg->phy->dev);
 		} else if ((!test_bit(ID, &motg->inputs) ||
 				test_bit(ID_A, &motg->inputs)) && otg->host) {
 			pr_debug("!id || id_A\n");
-			msm_otg_dbg_log_event(&motg->phy, "!ID || ID_A",
-					motg->inputs, otg->phy->state);
 			if (msm_chg_mhl_detect(motg)) {
 				work = 1;
 				break;
@@ -3290,8 +3019,6 @@ static void msm_otg_sm_work(struct work_struct *w)
 			work = 1;
 		} else if (test_bit(B_SESS_VLD, &motg->inputs)) {
 			pr_debug("b_sess_vld\n");
-			msm_otg_dbg_log_event(&motg->phy, "B_SESS_VLD",
-					motg->inputs, otg->phy->state);
 			switch (motg->chg_state) {
 			case USB_CHG_STATE_UNDEFINED:
 				msm_chg_detect_work(&motg->chg_work.work);
@@ -3303,13 +3030,6 @@ static void msm_otg_sm_work(struct work_struct *w)
 				case USB_PROPRIETARY_CHARGER:
 					msm_otg_notify_charger(motg,
 							IDEV_CHG_MAX);
-					otg->phy->state =
-						OTG_STATE_B_CHARGER;
-					work = 0;
-					msm_otg_dbg_log_event(&motg->phy,
-					"PM RUNTIME: PROPCHG PUT",
-					get_pm_runtime_counter(otg->phy->dev),
-					0);
 					pm_runtime_put_sync(otg->phy->dev);
 					break;
 				case USB_FLOATED_CHARGER:
@@ -3318,14 +3038,7 @@ static void msm_otg_sm_work(struct work_struct *w)
 					#else
 					msm_otg_notify_charger(motg,
 							IDEV_CHG_MAX);
-					otg->phy->state =
-						OTG_STATE_B_CHARGER;
-					work = 0;
-					msm_otg_dbg_log_event(&motg->phy,
-					"PM RUNTIME: FLCHG PUT",
-					get_pm_runtime_counter(otg->phy->dev),
-					0);
-					#endif					
+					#endif
 					pm_runtime_put_noidle(otg->phy->dev);
 					pm_runtime_suspend(otg->phy->dev);
 					break;
@@ -3367,9 +3080,6 @@ static void msm_otg_sm_work(struct work_struct *w)
 			}
 		} else if (test_bit(B_BUS_REQ, &motg->inputs)) {
 			pr_debug("b_sess_end && b_bus_req\n");
-			msm_otg_dbg_log_event(&motg->phy,
-				"B_SESS_END && B_BUS_REQ",
-				motg->inputs, otg->phy->state);
 			if (msm_otg_start_srp(otg) < 0) {
 				clear_bit(B_BUS_REQ, &motg->inputs);
 				work = 1;
@@ -3380,8 +3090,6 @@ static void msm_otg_sm_work(struct work_struct *w)
 			break;
 		} else {
 			pr_debug("chg_work cancel");
-			msm_otg_dbg_log_event(&motg->phy, "CHG_WORK CANCEL",
-					motg->inputs, otg->phy->state);
 			del_timer_sync(&motg->chg_check_timer);
 			clear_bit(B_FALSE_SDP, &motg->inputs);
 			clear_bit(A_BUS_REQ, &motg->inputs);
@@ -3408,17 +3116,10 @@ static void msm_otg_sm_work(struct work_struct *w)
 			if ((motg->pdata->otg_control == OTG_PMIC_CONTROL) &&
 					!msm_otg_read_pmic_id_state(motg)) {
 				pr_debug("process missed ID intr\n");
-				msm_otg_dbg_log_event(&motg->phy,
-						"PROCESS MISSED ID INTR",
-						motg->inputs, otg->phy->state);
 				clear_bit(ID, &motg->inputs);
 				work = 1;
 				break;
 			}
-			msm_otg_dbg_log_event(&motg->phy,
-					"PM RUNTIME: NOCHG PUT",
-					get_pm_runtime_counter(otg->phy->dev),
-					motg->pm_done);
 			pm_runtime_put_noidle(otg->phy->dev);
 			/*
 			 * Only if autosuspend was enabled in probe, it will be
@@ -3427,10 +3128,6 @@ static void msm_otg_sm_work(struct work_struct *w)
 			pm_runtime_mark_last_busy(otg->phy->dev);
 			pm_runtime_autosuspend(otg->phy->dev);
 			motg->pm_done = 1;
-			msm_otg_dbg_log_event(&motg->phy,
-					"PM RUNTIME: NOCHG PUT DONE",
-					get_pm_runtime_counter(otg->phy->dev),
-					motg->pm_done);
 		}
 		break;
 	case OTG_STATE_B_SRP_INIT:
@@ -3440,9 +3137,6 @@ static void msm_otg_sm_work(struct work_struct *w)
 				(test_bit(B_SESS_VLD, &motg->inputs) &&
 				!test_bit(ID_B, &motg->inputs))) {
 			pr_debug("!id || id_a/c || b_sess_vld+!id_b\n");
-			msm_otg_dbg_log_event(&motg->phy,
-					"!ID || ID_A/C || B_SESS_VLD+!ID_B",
-					motg->inputs, otg->phy->state);
 			msm_otg_del_timer(motg);
 			otg->phy->state = OTG_STATE_B_IDLE;
 			/*
@@ -3453,8 +3147,6 @@ static void msm_otg_sm_work(struct work_struct *w)
 			work = 1;
 		} else if (test_bit(B_SRP_FAIL, &motg->tmouts)) {
 			pr_debug("b_srp_fail\n");
-			msm_otg_dbg_log_event(&motg->phy, "B_SRP_FAIL",
-					motg->inputs, otg->phy->state);
 			pr_info("A-device did not respond to SRP\n");
 			clear_bit(B_BUS_REQ, &motg->inputs);
 			clear_bit(B_SRP_FAIL, &motg->tmouts);
@@ -3469,8 +3161,6 @@ static void msm_otg_sm_work(struct work_struct *w)
 		if (test_bit(B_SESS_VLD, &motg->inputs) &&
 				test_bit(B_FALSE_SDP, &motg->inputs)) {
 			pr_debug("B_FALSE_SDP\n");
-			msm_otg_dbg_log_event(&motg->phy, "B_FALSE_SDP",
-					motg->inputs, otg->phy->state);
 			msm_otg_start_peripheral(otg, 0);
 			motg->chg_type = USB_DCP_CHARGER;
 			clear_bit(B_FALSE_SDP, &motg->inputs);
@@ -3481,9 +3171,6 @@ static void msm_otg_sm_work(struct work_struct *w)
 				test_bit(ID_B, &motg->inputs) ||
 				!test_bit(B_SESS_VLD, &motg->inputs)) {
 			pr_debug("!id  || id_a/b || !b_sess_vld\n");
-			msm_otg_dbg_log_event(&motg->phy,
-					"!ID || ID_A/B || !B_SESS_VLD",
-					motg->inputs, otg->phy->state);
 			motg->chg_state = USB_CHG_STATE_UNDEFINED;
 			motg->chg_type = USB_INVALID_CHARGER;
 			msm_otg_notify_charger(motg, 0);
@@ -3503,9 +3190,6 @@ static void msm_otg_sm_work(struct work_struct *w)
 				otg->gadget->b_hnp_enable &&
 				test_bit(A_BUS_SUSPEND, &motg->inputs)) {
 			pr_debug("b_bus_req && b_hnp_en && a_bus_suspend\n");
-			msm_otg_dbg_log_event(&motg->phy,
-					"B_BUS_REQ && B_HNP_EN && A_BUS_SUSPEND",
-					motg->inputs, otg->phy->state);
 			msm_otg_start_timer(motg, TB_ASE0_BRST, B_ASE0_BRST);
 			/* D+ pullup should not be disconnected within 4msec
 			 * after A device suspends the bus. Otherwise PET will
@@ -3523,30 +3207,12 @@ static void msm_otg_sm_work(struct work_struct *w)
 		} else if (test_bit(A_BUS_SUSPEND, &motg->inputs) &&
 				   test_bit(B_SESS_VLD, &motg->inputs)) {
 			pr_debug("a_bus_suspend && b_sess_vld\n");
-			msm_otg_dbg_log_event(&motg->phy,
-					"A_BUS_SUSPEND && B_SESS_VLD",
-					motg->inputs, otg->phy->state);
 			if (motg->caps & ALLOW_LPM_ON_DEV_SUSPEND) {
-				msm_otg_dbg_log_event(&motg->phy,
-					"PM RUNTIME: BPER PUT",
-					get_pm_runtime_counter(otg->phy->dev),
-					motg->pm_done);
 				pm_runtime_put_noidle(otg->phy->dev);
 				pm_runtime_suspend(otg->phy->dev);
-				motg->pm_done = 1;
 			}
 		} else if (test_bit(ID_C, &motg->inputs)) {
 			msm_otg_notify_charger(motg, IDEV_ACA_CHG_MAX);
-		}
-		break;
-	case OTG_STATE_B_CHARGER:
-		if (test_bit(B_SESS_VLD, &motg->inputs)) {
-			pr_debug("BSV set again\n");
-			msm_otg_dbg_log_event(&motg->phy, "BSV SET AGAIN",
-					motg->inputs, otg->phy->state);
-		} else if (!test_bit(B_SESS_VLD, &motg->inputs)) {
-			otg->phy->state = OTG_STATE_B_IDLE;
-			work = 1;
 		}
 		break;
 	case OTG_STATE_B_WAIT_ACON:
@@ -3555,9 +3221,6 @@ static void msm_otg_sm_work(struct work_struct *w)
 				test_bit(ID_B, &motg->inputs) ||
 				!test_bit(B_SESS_VLD, &motg->inputs)) {
 			pr_debug("!id || id_a/b || !b_sess_vld\n");
-			msm_otg_dbg_log_event(&motg->phy,
-					"!ID || ID_A/B || !B_SESS_VLD",
-					motg->inputs, otg->phy->state);
 			msm_otg_del_timer(motg);
 			/*
 			 * A-device is physically disconnected during
@@ -3574,8 +3237,6 @@ static void msm_otg_sm_work(struct work_struct *w)
 			work = 1;
 		} else if (test_bit(A_CONN, &motg->inputs)) {
 			pr_debug("a_conn\n");
-			msm_otg_dbg_log_event(&motg->phy, "A_CONN",
-					motg->inputs, otg->phy->state);
 			clear_bit(A_BUS_SUSPEND, &motg->inputs);
 			otg->phy->state = OTG_STATE_B_HOST;
 			/*
@@ -3589,8 +3250,6 @@ static void msm_otg_sm_work(struct work_struct *w)
 						B_TST_CONFIG);
 		} else if (test_bit(B_ASE0_BRST, &motg->tmouts)) {
 			pr_debug("b_ase0_brst_tmout\n");
-			msm_otg_dbg_log_event(&motg->phy, "B_ASE0_BRST_TMOUT",
-					motg->inputs, otg->phy->state);
 			pr_info("B HNP fail:No response from A device\n");
 			msm_otg_start_host(otg, 0);
 			msm_otg_reset(otg->phy);
@@ -3610,9 +3269,6 @@ static void msm_otg_sm_work(struct work_struct *w)
 				!test_bit(A_CONN, &motg->inputs) ||
 				!test_bit(B_SESS_VLD, &motg->inputs)) {
 			pr_debug("!b_bus_req || !a_conn || !b_sess_vld\n");
-			msm_otg_dbg_log_event(&motg->phy,
-					"!B_BUS_REQ || !A_CONN || !B_SESS_VLD",
-					motg->inputs, otg->phy->state);
 			clear_bit(A_CONN, &motg->inputs);
 			clear_bit(B_BUS_REQ, &motg->inputs);
 			msm_otg_start_host(otg, 0);
@@ -3629,8 +3285,6 @@ static void msm_otg_sm_work(struct work_struct *w)
 		if (test_bit(ID, &motg->inputs) &&
 			!test_bit(ID_A, &motg->inputs)) {
 			pr_debug("id && !id_a\n");
-			msm_otg_dbg_log_event(&motg->phy, "!ID || ID_A",
-					motg->inputs, otg->phy->state);
 			otg->default_a = 0;
 			clear_bit(A_BUS_DROP, &motg->inputs);
 			otg->phy->state = OTG_STATE_B_IDLE;
@@ -3643,9 +3297,6 @@ static void msm_otg_sm_work(struct work_struct *w)
 				(test_bit(A_SRP_DET, &motg->inputs) ||
 				 test_bit(A_BUS_REQ, &motg->inputs))) {
 			pr_debug("!a_bus_drop && (a_srp_det || a_bus_req)\n");
-			msm_otg_dbg_log_event(&motg->phy,
-				"!A_BUS_DROP || A_SRP_DET || A_BUS_REQ",
-				motg->inputs, otg->phy->state);
 
 			clear_bit(A_SRP_DET, &motg->inputs);
 			/* Disable SRP detection */
@@ -3666,9 +3317,6 @@ static void msm_otg_sm_work(struct work_struct *w)
 			msm_otg_start_timer(motg, TA_WAIT_VRISE, A_WAIT_VRISE);
 		} else {
 			pr_debug("No session requested\n");
-			msm_otg_dbg_log_event(&motg->phy,
-					"NO SESSION REQUESTED",
-					motg->inputs, otg->phy->state);
 			clear_bit(A_BUS_DROP, &motg->inputs);
 			if (test_bit(ID_A, &motg->inputs)) {
 					msm_otg_notify_charger(motg,
@@ -3693,9 +3341,6 @@ static void msm_otg_sm_work(struct work_struct *w)
 				test_bit(A_BUS_DROP, &motg->inputs) ||
 				test_bit(A_WAIT_VRISE, &motg->tmouts)) {
 			pr_debug("id || a_bus_drop || a_wait_vrise_tmout\n");
-			msm_otg_dbg_log_event(&motg->phy,
-					"ID || A_BUS_DROP || A_WAIT_VRISE_TMOUT",
-					motg->inputs, otg->phy->state);
 			clear_bit(A_BUS_REQ, &motg->inputs);
 			msm_otg_del_timer(motg);
 			msm_hsusb_vbus_power(motg, 0);
@@ -3703,8 +3348,6 @@ static void msm_otg_sm_work(struct work_struct *w)
 			msm_otg_start_timer(motg, TA_WAIT_VFALL, A_WAIT_VFALL);
 		} else if (test_bit(A_VBUS_VLD, &motg->inputs)) {
 			pr_debug("a_vbus_vld\n");
-			msm_otg_dbg_log_event(&motg->phy, "A_VBUS_VLD",
-					motg->inputs, otg->phy->state);
 			otg->phy->state = OTG_STATE_A_WAIT_BCON;
 			if (TA_WAIT_BCON > 0)
 				msm_otg_start_timer(motg, TA_WAIT_BCON,
@@ -3727,9 +3370,6 @@ static void msm_otg_sm_work(struct work_struct *w)
 				test_bit(A_WAIT_BCON, &motg->tmouts)) {
 			pr_debug("(id && id_a/b/c) || a_bus_drop ||"
 					"a_wait_bcon_tmout\n");
-			msm_otg_dbg_log_event(&motg->phy,
-				"(ID && ID_A/B/C )|| A_BUSS_DROP || A_WAIT_BCON_TMOUT",
-				motg->inputs, otg->phy->state);
 			if (test_bit(A_WAIT_BCON, &motg->tmouts)) {
 				pr_info("Device No Response\n");
 				otg_send_event(otg, OTG_EVENT_DEV_CONN_TMOUT);
@@ -3750,8 +3390,6 @@ static void msm_otg_sm_work(struct work_struct *w)
 			msm_otg_start_timer(motg, TA_WAIT_VFALL, A_WAIT_VFALL);
 		} else if (!test_bit(A_VBUS_VLD, &motg->inputs)) {
 			pr_debug("!a_vbus_vld\n");
-			msm_otg_dbg_log_event(&motg->phy, "!A_VBUS_VLD",
-					motg->inputs, otg->phy->state);
 			clear_bit(B_CONN, &motg->inputs);
 			msm_otg_del_timer(motg);
 			msm_otg_start_host(otg, 0);
@@ -3764,13 +3402,8 @@ static void msm_otg_sm_work(struct work_struct *w)
 			 * If TA_WAIT_BCON is infinite, we don;t
 			 * turn off VBUS. Enter low power mode.
 			 */
-			if (TA_WAIT_BCON < 0) {
-				msm_otg_dbg_log_event(&motg->phy,
-					"PM RUNTIME: AWBCONN PUT",
-					get_pm_runtime_counter(otg->phy->dev),
-					0);
+			if (TA_WAIT_BCON < 0)
 				pm_runtime_put_sync(otg->phy->dev);
-			}
 		} else if (!test_bit(ID, &motg->inputs)) {
 			msm_hsusb_vbus_power(motg, 1);
 		}
@@ -3780,9 +3413,6 @@ static void msm_otg_sm_work(struct work_struct *w)
 				!test_bit(ID_A, &motg->inputs)) ||
 				test_bit(A_BUS_DROP, &motg->inputs)) {
 			pr_debug("id_a/b/c || a_bus_drop\n");
-			msm_otg_dbg_log_event(&motg->phy,
-					"ID_A/B/C || A_VBUS_DROP",
-					motg->inputs, otg->phy->state);
 			clear_bit(B_CONN, &motg->inputs);
 			clear_bit(A_BUS_REQ, &motg->inputs);
 			msm_otg_del_timer(motg);
@@ -3793,8 +3423,6 @@ static void msm_otg_sm_work(struct work_struct *w)
 			msm_otg_start_timer(motg, TA_WAIT_VFALL, A_WAIT_VFALL);
 		} else if (!test_bit(A_VBUS_VLD, &motg->inputs)) {
 			pr_debug("!a_vbus_vld\n");
-			msm_otg_dbg_log_event(&motg->phy, "!A_VBUS_VLD",
-					motg->inputs, otg->phy->state);
 			clear_bit(B_CONN, &motg->inputs);
 			msm_otg_del_timer(motg);
 			otg->phy->state = OTG_STATE_A_VBUS_ERR;
@@ -3806,24 +3434,15 @@ static void msm_otg_sm_work(struct work_struct *w)
 			 * suspended or HNP is in progress.
 			 */
 			pr_debug("!a_bus_req\n");
-			msm_otg_dbg_log_event(&motg->phy, "A_BUS_REQ",
-					motg->inputs, otg->phy->state);
 			msm_otg_del_timer(motg);
 			otg->phy->state = OTG_STATE_A_SUSPEND;
 			if (otg->host->b_hnp_enable)
 				msm_otg_start_timer(motg, TA_AIDL_BDIS,
 						A_AIDL_BDIS);
-			else {
-				msm_otg_dbg_log_event(&motg->phy,
-					"PM RUNTIME: AHOST PUT",
-					get_pm_runtime_counter(otg->phy->dev),
-					0);
+			else
 				pm_runtime_put_sync(otg->phy->dev);
-			}
 		} else if (!test_bit(B_CONN, &motg->inputs)) {
 			pr_debug("!b_conn\n");
-			msm_otg_dbg_log_event(&motg->phy, "!B_CONN",
-					motg->inputs, otg->phy->state);
 			msm_otg_del_timer(motg);
 			otg->phy->state = OTG_STATE_A_WAIT_BCON;
 			if (TA_WAIT_BCON > 0)
@@ -3854,9 +3473,6 @@ static void msm_otg_sm_work(struct work_struct *w)
 				test_bit(A_AIDL_BDIS, &motg->tmouts)) {
 			pr_debug("id_a/b/c || a_bus_drop ||"
 					"a_aidl_bdis_tmout\n");
-			msm_otg_dbg_log_event(&motg->phy,
-				"ID_A/B/C || A_BUS_DROP || A_AIDL_BDIS_TMOUT",
-				motg->inputs, otg->phy->state);
 			msm_otg_del_timer(motg);
 			clear_bit(B_CONN, &motg->inputs);
 			otg->phy->state = OTG_STATE_A_WAIT_VFALL;
@@ -3866,8 +3482,6 @@ static void msm_otg_sm_work(struct work_struct *w)
 			msm_otg_start_timer(motg, TA_WAIT_VFALL, A_WAIT_VFALL);
 		} else if (!test_bit(A_VBUS_VLD, &motg->inputs)) {
 			pr_debug("!a_vbus_vld\n");
-			msm_otg_dbg_log_event(&motg->phy, "!A_VBUS_VLD",
-					motg->inputs, otg->phy->state);
 			msm_otg_del_timer(motg);
 			clear_bit(B_CONN, &motg->inputs);
 			otg->phy->state = OTG_STATE_A_VBUS_ERR;
@@ -3876,9 +3490,6 @@ static void msm_otg_sm_work(struct work_struct *w)
 		} else if (!test_bit(B_CONN, &motg->inputs) &&
 				otg->host->b_hnp_enable) {
 			pr_debug("!b_conn && b_hnp_enable");
-			msm_otg_dbg_log_event(&motg->phy,
-					"!B_CONN && B_HNP_ENABLED",
-					motg->inputs, otg->phy->state);
 			otg->phy->state = OTG_STATE_A_PERIPHERAL;
 			msm_otg_host_hnp_enable(otg, 1);
 			otg->gadget->is_a_peripheral = 1;
@@ -3886,9 +3497,6 @@ static void msm_otg_sm_work(struct work_struct *w)
 		} else if (!test_bit(B_CONN, &motg->inputs) &&
 				!otg->host->b_hnp_enable) {
 			pr_debug("!b_conn && !b_hnp_enable");
-			msm_otg_dbg_log_event(&motg->phy,
-					"!B_CONN && !B_HNP_ENABLE",
-					motg->inputs, otg->phy->state);
 			/*
 			 * bus request is dropped during suspend.
 			 * acquire again for next device.
@@ -3912,8 +3520,6 @@ static void msm_otg_sm_work(struct work_struct *w)
 				!test_bit(ID_A, &motg->inputs)) ||
 				test_bit(A_BUS_DROP, &motg->inputs)) {
 			pr_debug("id _f/b/c || a_bus_drop\n");
-			msm_otg_dbg_log_event(&motg->phy, "ID_A/B/C A_BUS_DROP",
-					motg->inputs, otg->phy->state);
 			/* Clear BIDL_ADIS timer */
 			msm_otg_del_timer(motg);
 			otg->phy->state = OTG_STATE_A_WAIT_VFALL;
@@ -3926,8 +3532,6 @@ static void msm_otg_sm_work(struct work_struct *w)
 			msm_otg_start_timer(motg, TA_WAIT_VFALL, A_WAIT_VFALL);
 		} else if (!test_bit(A_VBUS_VLD, &motg->inputs)) {
 			pr_debug("!a_vbus_vld\n");
-			msm_otg_dbg_log_event(&motg->phy, "!A_VBUS_VLD",
-					motg->inputs, otg->phy->state);
 			/* Clear BIDL_ADIS timer */
 			msm_otg_del_timer(motg);
 			otg->phy->state = OTG_STATE_A_VBUS_ERR;
@@ -3936,8 +3540,6 @@ static void msm_otg_sm_work(struct work_struct *w)
 			msm_otg_start_host(otg, 0);
 		} else if (test_bit(A_BIDL_ADIS, &motg->tmouts)) {
 			pr_debug("a_bidl_adis_tmout\n");
-			msm_otg_dbg_log_event(&motg->phy, "A_BIDL_ADIS_TMOUT",
-					motg->inputs, otg->phy->state);
 			msm_otg_start_peripheral(otg, 0);
 			otg->gadget->is_a_peripheral = 0;
 			otg->phy->state = OTG_STATE_A_WAIT_BCON;
@@ -3980,7 +3582,7 @@ static void msm_otg_sm_work(struct work_struct *w)
 		break;
 	}
 	if (work)
-		queue_work(motg->otg_wq, &motg->sm_work);
+		queue_work(system_nrt_wq, &motg->sm_work);
 }
 
 static void msm_otg_suspend_work(struct work_struct *w)
@@ -4003,8 +3605,6 @@ static irqreturn_t msm_otg_irq(int irq, void *data)
 
 	if (atomic_read(&motg->in_lpm)) {
 		pr_debug("OTG IRQ: %d in LPM\n", irq);
-		msm_otg_dbg_log_event(&motg->phy, "OTG IRQ IS IN LPM",
-				irq, otg->phy->state);
 		disable_irq_nosync(irq);
 		motg->async_int = irq;
 		if (!atomic_read(&motg->pm_suspended)) {
@@ -4024,13 +3624,9 @@ static irqreturn_t msm_otg_irq(int irq, void *data)
 	if ((otgsc & OTGSC_IDIS) && (otgsc & OTGSC_IDIE)) {
 		if (otgsc & OTGSC_ID) {
 			dev_dbg(otg->phy->dev, "ID set\n");
-			msm_otg_dbg_log_event(&motg->phy, "ID SET",
-				motg->inputs, otg->phy->state);
 			set_bit(ID, &motg->inputs);
 		} else {
 			dev_dbg(otg->phy->dev, "ID clear\n");
-			msm_otg_dbg_log_event(&motg->phy, "ID CLEAR",
-					motg->inputs, otg->phy->state);
 			/*
 			 * Assert a_bus_req to supply power on
 			 * VBUS when Micro/Mini-A cable is connected
@@ -4060,13 +3656,9 @@ static irqreturn_t msm_otg_irq(int irq, void *data)
 			return IRQ_HANDLED;
 		if (otgsc & OTGSC_BSV) {
 			dev_dbg(otg->phy->dev, "BSV set\n");
-			msm_otg_dbg_log_event(&motg->phy, "BSV SET",
-					motg->inputs, otg->phy->state);
 			set_bit(B_SESS_VLD, &motg->inputs);
 		} else {
 			dev_dbg(otg->phy->dev, "BSV clear\n");
-			msm_otg_dbg_log_event(&motg->phy, "BSV CLEAR",
-					motg->inputs, otg->phy->state);
 			clear_bit(B_SESS_VLD, &motg->inputs);
 			clear_bit(A_BUS_SUSPEND, &motg->inputs);
 
@@ -4076,8 +3668,6 @@ static irqreturn_t msm_otg_irq(int irq, void *data)
 	} else if (usbsts & STS_PCI) {
 		pc = readl_relaxed(USB_PORTSC);
 		pr_debug("portsc = %x\n", pc);
-		msm_otg_dbg_log_event(&motg->phy, "PORTSC",
-				motg->inputs, otg->phy->state);
 		ret = IRQ_NONE;
 		/*
 		 * HCD Acks PCI interrupt. We use this to switch
@@ -4089,9 +3679,6 @@ static irqreturn_t msm_otg_irq(int irq, void *data)
 			if (otg->host->b_hnp_enable && (pc & PORTSC_CSC) &&
 					!(pc & PORTSC_CCS)) {
 				pr_debug("B_CONN clear\n");
-				msm_otg_dbg_log_event(&motg->phy,
-						"B_CONN CLEAR",
-						motg->inputs, otg->phy->state);
 				clear_bit(B_CONN, &motg->inputs);
 				msm_otg_del_timer(motg);
 			}
@@ -4107,8 +3694,6 @@ static irqreturn_t msm_otg_irq(int irq, void *data)
 		case OTG_STATE_B_WAIT_ACON:
 			if ((pc & PORTSC_CSC) && (pc & PORTSC_CCS)) {
 				pr_debug("A_CONN set\n");
-				msm_otg_dbg_log_event(&motg->phy, "A_CONN SET",
-						motg->inputs, otg->phy->state);
 				set_bit(A_CONN, &motg->inputs);
 				/* Clear ASE0_BRST timer */
 				msm_otg_del_timer(motg);
@@ -4117,9 +3702,6 @@ static irqreturn_t msm_otg_irq(int irq, void *data)
 		case OTG_STATE_B_HOST:
 			if ((pc & PORTSC_CSC) && !(pc & PORTSC_CCS)) {
 				pr_debug("A_CONN clear\n");
-				msm_otg_dbg_log_event(&motg->phy,
-						"A_CONN CLEAR",
-						motg->inputs, otg->phy->state);
 				clear_bit(A_CONN, &motg->inputs);
 				msm_otg_del_timer(motg);
 			}
@@ -4171,7 +3753,7 @@ static irqreturn_t msm_otg_irq(int irq, void *data)
 		ret = IRQ_HANDLED;
 	}
 	if (work)
-		queue_work(motg->otg_wq, &motg->sm_work);
+		queue_work(system_nrt_wq, &motg->sm_work);
 
 	return ret;
 }
@@ -4183,14 +3765,10 @@ static void msm_otg_set_vbus_state(int online)
 
 	if (online) {
 		pr_debug("PMIC: BSV set\n");
-		msm_otg_dbg_log_event(&motg->phy, "PMIC: BSV SET",
-				init, motg->inputs);
 		if (test_and_set_bit(B_SESS_VLD, &motg->inputs) && init)
 			return;
 	} else {
 		pr_debug("PMIC: BSV clear\n");
-		msm_otg_dbg_log_event(&motg->phy, "PMIC: BSV CLEAR",
-				init, motg->inputs);
 		if (!test_and_clear_bit(B_SESS_VLD, &motg->inputs) && init)
 			return;
 	}
@@ -4211,14 +3789,10 @@ static void msm_otg_set_vbus_state(int online)
 		if (pmic_vbus_init.done &&
 				test_bit(B_SESS_VLD, &motg->inputs)) {
 			pr_debug("PMIC: BSV came late\n");
-			msm_otg_dbg_log_event(&motg->phy, "PMIC: BSV CAME LATE",
-					init, motg->inputs);
 			goto out;
 		}
 		complete(&pmic_vbus_init);
 		pr_debug("PMIC: BSV init complete\n");
-		msm_otg_dbg_log_event(&motg->phy, "PMIC: BSV INIT COMPLETE",
-				init, motg->inputs);
 		return;
 	}
 
@@ -4229,14 +3803,11 @@ out:
 		return;
 	}
 
-	msm_otg_dbg_log_event(&motg->phy, "CHECK VBUS EVENT DURING SUSPEND",
-			atomic_read(&motg->pm_suspended),
-			motg->sm_work_pending);
 	if (atomic_read(&motg->pm_suspended)) {
 		motg->sm_work_pending = true;
 	} else if (!motg->sm_work_pending) {
 		/* process event only if previous one is not pending */
-		queue_work(motg->otg_wq, &motg->sm_work);
+		queue_work(system_nrt_wq, &motg->sm_work);
 	}
 }
 
@@ -4245,47 +3816,34 @@ static void msm_id_status_w(struct work_struct *w)
 	struct msm_otg *motg = container_of(w, struct msm_otg,
 						id_status_work.work);
 	int work = 0;
+	int id_state = 0;
 
 	dev_dbg(motg->phy.dev, "ID status_w\n");
 
 	if (motg->pdata->pmic_id_irq)
-		motg->id_state = msm_otg_read_pmic_id_state(motg);
+		id_state = msm_otg_read_pmic_id_state(motg);
 	else if (motg->ext_id_irq)
-		motg->id_state = gpio_get_value(motg->pdata->usb_id_gpio);
-	else if (motg->phy_irq)
-		motg->id_state = msm_otg_read_phy_id_state(motg);
+		id_state = gpio_get_value(motg->pdata->usb_id_gpio);
 
-	if (motg->id_state) {
-		if (gpio_is_valid(motg->pdata->switch_sel_gpio))
-			gpio_direction_input(motg->pdata->switch_sel_gpio);
+	if (id_state) {
 		if (!test_and_set_bit(ID, &motg->inputs)) {
 			pr_debug("ID set\n");
-			msm_otg_dbg_log_event(&motg->phy, "ID SET",
-					motg->inputs, motg->phy.state);
 			work = 1;
 		}
 	} else {
-		if (gpio_is_valid(motg->pdata->switch_sel_gpio))
-			gpio_direction_output(motg->pdata->switch_sel_gpio, 1);
 		if (test_and_clear_bit(ID, &motg->inputs)) {
 			pr_debug("ID clear\n");
-			msm_otg_dbg_log_event(&motg->phy, "ID CLEAR",
-					motg->inputs, motg->phy.state);
 			set_bit(A_BUS_REQ, &motg->inputs);
 			work = 1;
 		}
 	}
 
 	if (work && (motg->phy.state != OTG_STATE_UNDEFINED)) {
-		msm_otg_dbg_log_event(&motg->phy,
-				"CHECK ID EVENT DURING SUSPEND",
-				atomic_read(&motg->pm_suspended),
-				motg->sm_work_pending);
 		if (atomic_read(&motg->pm_suspended)) {
 			motg->sm_work_pending = true;
 		} else if (!motg->sm_work_pending) {
 			/* process event only if previous one is not pending */
-			queue_work(motg->otg_wq, &motg->sm_work);
+			queue_work(system_nrt_wq, &motg->sm_work);
 		}
 	}
 
@@ -4304,7 +3862,7 @@ static irqreturn_t msm_id_irq(int irq, void *data)
 
 	if (!aca_id_turned_on)
 		/*schedule delayed work for 5msec for ID line state to settle*/
-		queue_delayed_work(motg->otg_wq, &motg->id_status_work,
+		queue_delayed_work(system_nrt_wq, &motg->id_status_work,
 				msecs_to_jiffies(MSM_ID_STATUS_DELAY));
 
 	return IRQ_HANDLED;
@@ -4318,8 +3876,6 @@ int msm_otg_pm_notify(struct notifier_block *notify_block,
 
 	dev_dbg(motg->phy.dev, "OTG PM notify:%lx, sm_pending:%u\n", mode,
 					motg->sm_work_pending);
-	msm_otg_dbg_log_event(&motg->phy, "PM NOTIFY",
-			mode, motg->sm_work_pending);
 
 	switch (mode) {
 	case PM_POST_SUSPEND:
@@ -4329,7 +3885,7 @@ int msm_otg_pm_notify(struct notifier_block *notify_block,
 		/* Handle any deferred wakeup events from USB during suspend */
 		if (motg->sm_work_pending) {
 			motg->sm_work_pending = false;
-			queue_work(motg->otg_wq, &motg->sm_work);
+			queue_work(system_nrt_wq, &motg->sm_work);
 		}
 		break;
 
@@ -4437,10 +3993,8 @@ static ssize_t msm_otg_mode_write(struct file *file, const char __user *ubuf,
 		goto out;
 	}
 
-	motg->id_state = (test_bit(ID, &motg->inputs)) ? USB_ID_FLOAT :
-							USB_ID_GROUND;
 	pm_runtime_resume(phy->dev);
-	queue_work(motg->otg_wq, &motg->sm_work);
+	queue_work(system_nrt_wq, &motg->sm_work);
 out:
 	return status;
 }
@@ -4600,39 +4154,6 @@ otg_get_prop_usbin_voltage_now(struct msm_otg *motg)
 	}
 }
 
-static int msm_otg_pmic_dp_dm(struct msm_otg *motg, int value)
-{
-	int ret = 0;
-
-	switch (value) {
-	case POWER_SUPPLY_DP_DM_DPF_DMF:
-		if (!motg->rm_pulldown) {
-			ret = msm_hsusb_ldo_enable(motg, USB_PHY_REG_ON);
-			if (!ret) {
-				motg->rm_pulldown = true;
-				msm_otg_dbg_log_event(&motg->phy, "RM Pulldown",
-						motg->rm_pulldown, 0);
-			}
-		}
-		break;
-	case POWER_SUPPLY_DP_DM_DPR_DMR:
-		if (motg->rm_pulldown) {
-			ret = msm_hsusb_ldo_enable(motg, USB_PHY_REG_OFF);
-			if (!ret) {
-				motg->rm_pulldown = false;
-				msm_otg_dbg_log_event(&motg->phy, "RM Pulldown",
-						motg->rm_pulldown, 0);
-			}
-		}
-		break;
-	default:
-		ret = -EINVAL;
-		break;
-	}
-
-	return ret;
-}
-
 static int otg_power_get_property_usb(struct power_supply *psy,
 				  enum power_supply_property psp,
 				  union power_supply_propval *val)
@@ -4653,9 +4174,6 @@ static int otg_power_get_property_usb(struct power_supply *psy,
 		break;
 	case POWER_SUPPLY_PROP_PRESENT:
 		val->intval = !!test_bit(B_SESS_VLD, &motg->inputs);
-		break;
-	case POWER_SUPPLY_PROP_DP_DM:
-		val->intval = motg->rm_pulldown;
 		break;
 	/* Reflect USB enumeration */
 	case POWER_SUPPLY_PROP_ONLINE:
@@ -4682,16 +4200,7 @@ static int otg_power_set_property_usb(struct power_supply *psy,
 {
 	struct msm_otg *motg = container_of(psy, struct msm_otg, usb_psy);
 
-	msm_otg_dbg_log_event(&motg->phy, "SET PWR PROPERTY", psp, psy->type);
 	switch (psp) {
-	case POWER_SUPPLY_PROP_USB_OTG:
-		motg->id_state = val->intval ? USB_ID_GROUND : USB_ID_FLOAT;
-		queue_delayed_work(motg->otg_wq, &motg->id_status_work, 0);
-		break;
-	/* PMIC notification for DP DM state */
-	case POWER_SUPPLY_PROP_DP_DM:
-		msm_otg_pmic_dp_dm(motg, val->intval);
-		break;
 	/* Process PMIC notification in PRESENT prop */
 	case POWER_SUPPLY_PROP_PRESENT:
 		msm_otg_set_vbus_state(val->intval);
@@ -4733,10 +4242,6 @@ static int otg_power_set_property_usb(struct power_supply *psy,
 		case POWER_SUPPLY_TYPE_USB_CDP:
 			motg->chg_type = USB_CDP_CHARGER;
 			break;
-		case POWER_SUPPLY_TYPE_USB_HVDCP:
-			motg->chg_type = USB_DCP_CHARGER;
-			msm_otg_notify_charger(motg, hvdcp_max_current);
-			break;
 		case POWER_SUPPLY_TYPE_USB_ACA:
 			motg->chg_type = USB_PROPRIETARY_CHARGER;
 			break;
@@ -4750,8 +4255,6 @@ static int otg_power_set_property_usb(struct power_supply *psy,
 
 		dev_dbg(motg->phy.dev, "%s: charger type = %s\n", __func__,
 			chg_to_string(motg->chg_type));
-		msm_otg_dbg_log_event(&motg->phy, "SET CHARGER TYPE ",
-				motg->chg_type, psy->type);
 		break;
 	case POWER_SUPPLY_PROP_HEALTH:
 		motg->usbin_health = val->intval;
@@ -4773,7 +4276,6 @@ static int otg_power_property_is_writeable_usb(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_ONLINE:
 	case POWER_SUPPLY_PROP_VOLTAGE_MAX:
 	case POWER_SUPPLY_PROP_CURRENT_MAX:
-	case POWER_SUPPLY_PROP_DP_DM:
 		return 1;
 	default:
 		break;
@@ -4784,9 +4286,9 @@ static int otg_power_property_is_writeable_usb(struct power_supply *psy,
 
 static char *otg_pm_power_supplied_to[] = {
 	"battery",
-#ifdef CONFIG_ZTEMT_BQ24296_CHARGE
+   #ifdef CONFIG_ZTEMT_BQ24296_CHARGE
    "bq24296-battery",
-#endif
+	 #endif
 };
 
 static enum power_supply_property otg_pm_power_props_usb[] = {
@@ -4798,7 +4300,6 @@ static enum power_supply_property otg_pm_power_props_usb[] = {
 	POWER_SUPPLY_PROP_SCOPE,
 	POWER_SUPPLY_PROP_TYPE,
 	POWER_SUPPLY_PROP_VOLTAGE_NOW,
-	POWER_SUPPLY_PROP_DP_DM,
 };
 
 const struct file_operations msm_otg_bus_fops = {
@@ -4944,7 +4445,6 @@ static struct platform_device *msm_otg_add_pdev(
 		ci_pdata.l1_supported = otg_pdata->l1_supported;
 		ci_pdata.enable_ahb2ahb_bypass =
 				otg_pdata->enable_ahb2ahb_bypass;
-		ci_pdata.system_clk = otg_pdata->system_clk;
 		retval = platform_device_add_data(pdev, &ci_pdata,
 			sizeof(ci_pdata));
 		if (retval)
@@ -5028,8 +4528,6 @@ static int msm_otg_ext_chg_open(struct inode *inode, struct file *file)
 	struct msm_otg *motg = the_msm_otg;
 
 	pr_debug("msm_otg ext chg open\n");
-	msm_otg_dbg_log_event(&motg->phy, "EXT CHG: OPEN",
-			motg->inputs, motg->phy.state);
 
 	motg->ext_chg_opened = true;
 	file->private_data = (void *)motg;
@@ -5043,7 +4541,6 @@ msm_otg_ext_chg_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	struct msm_usb_chg_info info = {0};
 	int ret = 0, val;
 
-	msm_otg_dbg_log_event(&motg->phy, "EXT CHG: IOCTL", cmd, 0);
 	switch (cmd) {
 	case MSM_USB_EXT_CHG_INFO:
 		info.chg_block_type = USB_CHG_BLOCK_ULPI;
@@ -5063,7 +4560,6 @@ msm_otg_ext_chg_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			break;
 		}
 		pr_debug("%s: LPM block request %d\n", __func__, val);
-		msm_otg_dbg_log_event(&motg->phy, "LPM BLOCK REQ", val, 0);
 		if (val) { /* block LPM */
 			if (motg->chg_type == USB_DCP_CHARGER) {
 				motg->ext_chg_active = ACTIVE;
@@ -5076,13 +4572,8 @@ msm_otg_ext_chg_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 				 */
 				if (pm_runtime_suspended(motg->phy.dev))
 					pm_runtime_resume(motg->phy.dev);
-				else {
-					msm_otg_dbg_log_event(&motg->phy,
-					"PM RUNTIME: EXT_CHG GET",
-					get_pm_runtime_counter(motg->phy.dev),
-					0);
+				else
 					pm_runtime_get_sync(motg->phy.dev);
-				}
 			} else {
 				motg->ext_chg_active = INACTIVE;
 				complete(&motg->ext_chg_wait);
@@ -5098,10 +4589,6 @@ msm_otg_ext_chg_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			 * followed by decrementing the PM usage counters.
 			 */
 			flush_work(&motg->sm_work);
-			msm_otg_dbg_log_event(&motg->phy,
-					"PM RUNTIME: EXT_CHG PUT",
-					get_pm_runtime_counter(motg->phy.dev),
-					motg->pm_done);
 			pm_runtime_put_noidle(motg->phy.dev);
 			motg->pm_done = 1;
 			pm_runtime_suspend(motg->phy.dev);
@@ -5113,7 +4600,6 @@ msm_otg_ext_chg_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			ret = -EFAULT;
 			break;
 		}
-		msm_otg_dbg_log_event(&motg->phy, "EXT CHG: VOL REQ", cmd, val);
 
 		if (val == USB_REQUEST_5V)
 			pr_debug("%s:voting 5V voltage request\n", __func__);
@@ -5126,7 +4612,6 @@ msm_otg_ext_chg_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			ret = -EFAULT;
 			break;
 		}
-		msm_otg_dbg_log_event(&motg->phy, "EXT CHG: VOL REQ", cmd, val);
 
 		if (!val)
 			pr_debug("%s:voltage request successful\n", __func__);
@@ -5139,7 +4624,6 @@ msm_otg_ext_chg_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			ret = -EFAULT;
 			break;
 		}
-		msm_otg_dbg_log_event(&motg->phy, "EXT CHG: VOL REQ", cmd, val);
 
 		if (val)
 			pr_debug("%s:charger is external charger\n", __func__);
@@ -5180,8 +4664,6 @@ static int msm_otg_ext_chg_release(struct inode *inode, struct file *file)
 	struct msm_otg *motg = file->private_data;
 
 	pr_debug("msm_otg ext chg release\n");
-	msm_otg_dbg_log_event(&motg->phy, "EXT CHG: RELEASE",
-			motg->inputs, motg->phy.state);
 
 	motg->ext_chg_opened = false;
 
@@ -5336,18 +4818,7 @@ struct msm_otg_platform_data *msm_otg_dt_to_pdata(struct platform_device *pdev)
 	if (pdata->pmic_id_irq < 0)
 		pdata->pmic_id_irq = 0;
 
-	pdata->hub_reset_gpio = of_get_named_gpio(
-			node, "qcom,hub-reset-gpio", 0);
-	if (pdata->hub_reset_gpio < 0)
-		pr_debug("hub_reset_gpio is not available\n");
-
-	pdata->switch_sel_gpio =
-			of_get_named_gpio(node, "qcom,sw-sel-gpio", 0);
-	if (pdata->switch_sel_gpio < 0)
-		pr_debug("switch_sel_gpio is not available\n");
-
-	pdata->usb_id_gpio =
-			of_get_named_gpio(node, "qcom,usbid-gpio", 0);
+	pdata->usb_id_gpio = of_get_named_gpio(node, "qcom,usbid-gpio", 0);
 	if (pdata->usb_id_gpio < 0)
 		pr_debug("usb_id_gpio is not available\n");
 
@@ -5412,8 +4883,7 @@ static int msm_otg_probe(struct platform_device *pdev)
 	 * Get Max supported clk frequency for USB Core CLK and request
 	 * to set the same.
 	 */
-	motg->core_clk_rate = clk_round_rate(motg->core_clk,
-		USB_DEFAULT_SYSTEM_CLOCK);
+	motg->core_clk_rate = clk_round_rate(motg->core_clk, LONG_MAX);
 	if (IS_ERR_VALUE(motg->core_clk_rate)) {
 		dev_err(&pdev->dev, "fail to get core clk max freq.\n");
 	} else {
@@ -5543,8 +5013,6 @@ static int msm_otg_probe(struct platform_device *pdev)
 	motg->pdata = pdata;
 	phy = &motg->phy;
 	phy->dev = &pdev->dev;
-	motg->dbg_idx = 0;
-	motg->dbg_lock = __RW_LOCK_UNLOCKED(lck);
 
 	if (motg->pdata->bus_scale_table) {
 		motg->bus_perf_client =
@@ -5558,8 +5026,6 @@ static int msm_otg_probe(struct platform_device *pdev)
 			msm_otg_bus_vote(motg, USB_MIN_PERF_VOTE);
 		}
 	}
-
-	pdata->system_clk = motg->core_clk;
 
 	ret = msm_otg_bus_freq_get(motg->phy.dev, motg);
 	if (ret)
@@ -5593,7 +5059,7 @@ static int msm_otg_probe(struct platform_device *pdev)
 		ret = -ENOMEM;
 		goto devote_bus_bw;
 	}
-	dev_info(&pdev->dev, "OTG regs = %pK\n", motg->regs);
+	dev_info(&pdev->dev, "OTG regs = %p\n", motg->regs);
 
 	if (pdata->enable_sec_phy) {
 		res = platform_get_resource_byname(pdev,
@@ -5760,7 +5226,6 @@ static int msm_otg_probe(struct platform_device *pdev)
 	/* Ensure that above STOREs are completed before enabling interrupts */
 	mb();
 
-	motg->id_state = USB_ID_FLOAT;
 	ret = msm_otg_mhl_register_callback(motg, msm_otg_mhl_notify_online);
 	if (ret)
 		dev_dbg(&pdev->dev, "MHL can not be supported\n");
@@ -5774,13 +5239,6 @@ static int msm_otg_probe(struct platform_device *pdev)
 				(unsigned long) motg);
 	setup_timer(&motg->chg_check_timer, msm_otg_chg_check_timer_func,
 				(unsigned long) motg);
-	motg->otg_wq = alloc_ordered_workqueue("k_otg", 0);
-	if (!motg->otg_wq) {
-		pr_err("%s: Unable to create workqueue otg_wq\n",
-			__func__);
-		goto destroy_wlock;
-	}
-
 	ret = request_irq(motg->irq, msm_otg_irq, IRQF_SHARED,
 					"msm_otg", motg);
 	if (ret) {
@@ -5788,38 +5246,12 @@ static int msm_otg_probe(struct platform_device *pdev)
 		goto destroy_wlock;
 	}
 
-	motg->phy_irq = platform_get_irq_byname(pdev, "phy_irq");
-	if (motg->phy_irq < 0) {
-		dev_dbg(&pdev->dev, "phy_irq is not present\n");
-		motg->phy_irq = 0;
-	} else {
-
-		/* clear all interrupts before enabling the IRQ */
-		writeb_relaxed(0xFF, USB2_PHY_USB_PHY_INTERRUPT_CLEAR0);
-		writeb_relaxed(0xFF, USB2_PHY_USB_PHY_INTERRUPT_CLEAR1);
-
-		writeb_relaxed(0x1, USB2_PHY_USB_PHY_IRQ_CMD);
-		/*
-		 * Databook says 200 usec delay is required for
-		 * clearing the interrupts.
-		 */
-		udelay(200);
-		writeb_relaxed(0x0, USB2_PHY_USB_PHY_IRQ_CMD);
-
-		ret = request_irq(motg->phy_irq, msm_otg_phy_irq_handler,
-				IRQF_TRIGGER_RISING, "msm_otg_phy_irq", motg);
-		if (ret < 0) {
-			dev_err(&pdev->dev, "phy_irq request fail %d\n", ret);
-			goto free_irq;
-		}
-	}
-
 	if (motg->async_irq) {
 		ret = request_irq(motg->async_irq, msm_otg_irq,
 					IRQF_TRIGGER_RISING, "msm_otg", motg);
 		if (ret) {
 			dev_err(&pdev->dev, "request irq failed (ASYNC INT)\n");
-			goto free_phy_irq;
+			goto free_irq;
 		}
 		disable_irq(motg->async_irq);
 	}
@@ -5835,7 +5267,6 @@ static int msm_otg_probe(struct platform_device *pdev)
 	phy->init = msm_otg_reset;
 	phy->set_power = msm_otg_set_power;
 	phy->set_suspend = msm_otg_set_suspend;
-	phy->dbg_event = msm_otg_dbg_log_event;
 
 	phy->io_ops = &msm_otg_io_ops;
 
@@ -5857,8 +5288,7 @@ static int msm_otg_probe(struct platform_device *pdev)
 	}
 
 	if (motg->pdata->mode == USB_OTG &&
-		motg->pdata->otg_control == OTG_PMIC_CONTROL &&
-		!motg->phy_irq) {
+		motg->pdata->otg_control == OTG_PMIC_CONTROL) {
 
 		if (gpio_is_valid(motg->pdata->usb_id_gpio)) {
 			/* usb_id_gpio request */
@@ -5869,43 +5299,6 @@ static int msm_otg_probe(struct platform_device *pdev)
 				motg->pdata->usb_id_gpio = 0;
 				goto remove_phy;
 			}
-
-			/* The following code implements switch between the HOST
-			 * mode to device mode when used diferent HW components
-			 * on the same port: USB HUB and the usb jack type B
-			 * for device mode In this case HUB should be gone
-			 * only once out of reset at the boot time and after
-			 * that always stay on*/
-			if (gpio_is_valid(motg->pdata->hub_reset_gpio)) {
-				ret = devm_gpio_request(&pdev->dev,
-						motg->pdata->hub_reset_gpio,
-						"qcom,hub-reset-gpio");
-				if (ret < 0) {
-					dev_err(&pdev->dev, "gpio req failed for hub reset\n");
-					goto remove_phy;
-				}
-				gpio_direction_output(
-					motg->pdata->hub_reset_gpio, 1);
-			}
-
-			if (gpio_is_valid(motg->pdata->switch_sel_gpio)) {
-				ret = devm_gpio_request(&pdev->dev,
-						motg->pdata->switch_sel_gpio,
-						"qcom,sw-sel-gpio");
-				if (ret < 0) {
-					dev_err(&pdev->dev, "gpio req failed for switch sel\n");
-					goto remove_phy;
-				}
-				if (gpio_get_value(motg->pdata->usb_id_gpio))
-					gpio_direction_input(
-						motg->pdata->switch_sel_gpio);
-
-				else
-					gpio_direction_output(
-					    motg->pdata->switch_sel_gpio,
-					    1);
-			}
-
 			/* usb_id_gpio to irq */
 			id_irq = gpio_to_irq(motg->pdata->usb_id_gpio);
 			motg->ext_id_irq = id_irq;
@@ -5946,7 +5339,7 @@ static int msm_otg_probe(struct platform_device *pdev)
 			 motg->pdata->pmic_id_irq || motg->ext_id_irq))
 		motg->caps = ALLOW_PHY_POWER_COLLAPSE | ALLOW_PHY_RETENTION;
 
-	if (motg->pdata->otg_control == OTG_PHY_CONTROL || motg->phy_irq)
+	if (motg->pdata->otg_control == OTG_PHY_CONTROL)
 		motg->caps = ALLOW_PHY_RETENTION | ALLOW_PHY_REGULATORS_LPM;
 
 	if (motg->pdata->mpm_dpshv_int || motg->pdata->mpm_dmshv_int)
@@ -6015,10 +5408,8 @@ static int msm_otg_probe(struct platform_device *pdev)
 		}
 	}
 
-	init_waitqueue_head(&motg->host_suspend_wait);
 	motg->pm_notify.notifier_call = msm_otg_pm_notify;
 	register_pm_notifier(&motg->pm_notify);
-	msm_otg_dbg_log_event(phy, "OTG PROBE", motg->caps, motg->lpm_flags);
 
 	return 0;
 
@@ -6036,16 +5427,12 @@ remove_phy:
 free_async_irq:
 	if (motg->async_irq)
 		free_irq(motg->async_irq, motg);
-free_phy_irq:
-	if (motg->phy_irq)
-		free_irq(motg->phy_irq, motg);
 free_irq:
 	free_irq(motg->irq, motg);
 destroy_wlock:
 	wake_lock_destroy(&motg->wlock);
 	clk_disable_unprepare(motg->core_clk);
 	msm_hsusb_ldo_enable(motg, USB_PHY_REG_OFF);
-	destroy_workqueue(motg->otg_wq);
 free_ldo_init:
 	msm_hsusb_ldo_init(motg, 0);
 free_hsusb_vdd:
@@ -6123,7 +5510,6 @@ static int msm_otg_remove(struct platform_device *pdev)
 	cancel_delayed_work_sync(&motg->id_status_work);
 	cancel_delayed_work_sync(&motg->suspend_work);
 	cancel_work_sync(&motg->sm_work);
-	destroy_workqueue(motg->otg_wq);
 
 	pm_runtime_resume(&pdev->dev);
 
@@ -6132,8 +5518,6 @@ static int msm_otg_remove(struct platform_device *pdev)
 	wake_lock_destroy(&motg->wlock);
 
 	msm_hsusb_mhl_switch_enable(motg, 0);
-	if (motg->phy_irq)
-		free_irq(motg->phy_irq, motg);
 	if (motg->pdata->pmic_id_irq)
 		free_irq(motg->pdata->pmic_id_irq, motg);
 	usb_remove_phy(phy);
@@ -6215,8 +5599,6 @@ static int msm_otg_runtime_idle(struct device *dev)
 	struct usb_phy *phy = &motg->phy;
 
 	dev_dbg(dev, "OTG runtime idle\n");
-	msm_otg_dbg_log_event(phy, "RUNTIME IDLE",
-			phy->state, motg->ext_chg_active);
 
 	if (phy->state == OTG_STATE_UNDEFINED)
 		return -EAGAIN;
@@ -6246,8 +5628,6 @@ static int msm_otg_runtime_suspend(struct device *dev)
 	struct msm_otg *motg = dev_get_drvdata(dev);
 
 	dev_dbg(dev, "OTG runtime suspend\n");
-	msm_otg_dbg_log_event(&motg->phy, "RUNTIME SUSPEND",
-			get_pm_runtime_counter(dev), 0);
 	return msm_otg_suspend(motg);
 }
 
@@ -6256,12 +5636,8 @@ static int msm_otg_runtime_resume(struct device *dev)
 	struct msm_otg *motg = dev_get_drvdata(dev);
 
 	dev_dbg(dev, "OTG runtime resume\n");
-	msm_otg_dbg_log_event(&motg->phy, "RUNTIME RESUME",
-			get_pm_runtime_counter(dev), motg->pm_done);
 	pm_runtime_get_noresume(dev);
 	motg->pm_done = 0;
-	msm_otg_dbg_log_event(&motg->phy, "RUNTIME RESUME DONE",
-			get_pm_runtime_counter(dev), motg->pm_done);
 	return msm_otg_resume(motg);
 }
 #endif
@@ -6273,9 +5649,6 @@ static int msm_otg_pm_suspend(struct device *dev)
 	struct msm_otg *motg = dev_get_drvdata(dev);
 
 	dev_dbg(dev, "OTG PM suspend\n");
-	msm_otg_dbg_log_event(&motg->phy, "PM SUSPEND START",
-			get_pm_runtime_counter(dev),
-			atomic_read(&motg->pm_suspended));
 
 	atomic_set(&motg->pm_suspended, 1);
 	ret = msm_otg_suspend(motg);
@@ -6291,16 +5664,11 @@ static int msm_otg_pm_resume(struct device *dev)
 	struct msm_otg *motg = dev_get_drvdata(dev);
 
 	dev_dbg(dev, "OTG PM resume\n");
-	msm_otg_dbg_log_event(&motg->phy, "PM RESUME START",
-			get_pm_runtime_counter(dev), motg->pm_done);
 
 	motg->pm_done = 0;
 
 	if (motg->async_int || motg->sm_work_pending ||
-			motg->phy_irq_pending ||
 			!pm_runtime_suspended(dev)) {
-		msm_otg_dbg_log_event(&motg->phy, "PM RESUME BY USB",
-				motg->async_int, motg->phy_irq_pending);
 		pm_runtime_get_noresume(dev);
 		ret = msm_otg_resume(motg);
 
@@ -6311,8 +5679,6 @@ static int msm_otg_pm_resume(struct device *dev)
 
 		/* sm work will start in pm notify */
 	}
-	msm_otg_dbg_log_event(&motg->phy, "PM RESUME DONE",
-			get_pm_runtime_counter(dev), motg->pm_done);
 
 	return ret;
 }
